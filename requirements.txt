@@ -1,0 +1,56 @@
+# Django Core
+Django==5.1.4
+asgiref==3.8.1
+
+# Django REST Framework
+djangorestframework==3.15.2
+
+# CORS Headers
+django-cors-headers==4.6.0
+
+# API Documentation
+drf-yasg==1.21.8
+
+# PostgreSQL & PostGIS
+psycopg2-binary==2.9.10
+
+# GIS Support (GDAL installed via system packages in Dockerfile)
+# GDAL==3.10.0  # Installed via apt-get in Dockerfile
+
+# Celery & Redis
+celery==5.4.0
+redis==5.2.1
+django-celery-beat==2.7.0
+django-celery-results==2.5.1
+
+# Environment variables
+python-decouple==3.8
+
+# Development tools
+django-debug-toolbar==6.1.0
+django-silk==0.5.2
+autopep8==2.3.2
+
+# Utility packages
+python-dateutil==2.9.0.post0
+pytz==2025.2
+Pillow==11.0.0
+gunicorn==23.0.0
+
+# Dependencies
+certifi==2025.11.12
+charset-normalizer==3.4.4
+idna==3.11
+inflection==0.5.1
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+packaging==25.0
+pycodestyle==2.14.0
+Pygments==2.19.2
+PyYAML==6.0.3
+requests==2.32.5
+simplejson==3.20.2
+six==1.17.0
+sqlparse==0.5.3
+uritemplate==4.2.0
+urllib3==2.5.0
