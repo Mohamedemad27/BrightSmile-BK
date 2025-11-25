@@ -80,6 +80,7 @@ docker-compose exec web python manage.py test apps.core
 
 | File | Description |
 |------|-------------|
+| `GITHUB_PROJECTS_GUIDE.md` | Team task tracking and workflow guide |
 | `CORE_APP_SUMMARY.md` | Complete core app overview |
 | `HEALTH_CHECK_GUIDE.md` | Detailed health check guide |
 | `SETUP_SUMMARY.md` | Initial project setup guide |

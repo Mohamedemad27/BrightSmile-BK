@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/Bright-Smile-Smart/Bright-Smile-BE/blob/main/README.md
+    about: Check the documentation for setup and usage guides
+  - name: Health Check Guide
+    url: https://github.com/Bright-Smile-Smart/Bright-Smile-BE/blob/main/HEALTH_CHECK_GUIDE.md
+    about: Health check endpoint documentation and troubleshooting

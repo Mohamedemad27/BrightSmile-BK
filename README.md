@@ -436,13 +436,25 @@ If you get GDAL or GEOS library errors:
 - Verify Celery worker is running
 - Check broker URL in settings
 
-## Contributing
+## Team Collaboration & Task Tracking
 
-1. Create a feature branch
-2. Make your changes
-3. Run tests
-4. Submit a pull request
+This project uses **GitHub Projects** for task management and team collaboration.
 
-## License
+### Getting Started
 
-[Your License Here]
+1. **View the Project Board**: Go to the [Projects tab](https://github.com/Bright-Smile-Smart/Bright-Smile-BE/projects)
+2. **Read the Guide**: See [GITHUB_PROJECTS_GUIDE.md](GITHUB_PROJECTS_GUIDE.md) for complete setup instructions
+3. **Create Issues**: Use our issue templates for bugs, features, and tasks
+4. **Track Progress**: Move cards through the board as you work
+
+### Quick Workflow
+
+1. **Create an issue** using one of our templates (Bug Report, Feature Request, or Task)
+2. **Assign yourself** when you start work
+3. **Create a branch**: `git checkout -b feature/issue-number-description`
+4. **Make your changes** and commit with reference: `git commit -m "Description #issue-number"`
+5. **Create a Pull Request** using the PR template
+6. **Request reviews** from team members
+7. **Merge after approval**
+
+For detailed instructions, see [GITHUB_PROJECTS_GUIDE.md](GITHUB_PROJECTS_GUIDE.md)
