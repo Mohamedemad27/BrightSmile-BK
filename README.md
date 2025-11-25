@@ -289,6 +289,7 @@ Bright-Smile-BE/
 │       ├── views.py       # Health check endpoint
 │       ├── serializers.py # API serializers
 │       └── tests.py       # Tests
+├── utils/                 # Utility functions and helpers
 ├── static/                # Static files
 ├── media/                 # User uploads
 ├── logs/                  # Application logs

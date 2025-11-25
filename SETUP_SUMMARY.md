@@ -208,6 +208,7 @@ Bright-Smile-BE/
 │   ├── urls.py                # URL routing
 │   ├── wsgi.py                # WSGI config
 │   └── asgi.py                # ASGI config
+├── utils/                     # Utility functions and helpers
 ├── static/                    # Static files
 ├── media/                     # User uploads
 ├── logs/                      # Application logs
