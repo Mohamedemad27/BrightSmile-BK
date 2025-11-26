@@ -5,12 +5,14 @@ Django REST API with PostGIS support for geographic data, Celery for background 
 ## Features
 
 - Django 5.2.8 with Django REST Framework
+- Custom user model with email-based authentication
 - PostGIS for geographic/spatial data support
 - Celery for asynchronous task processing
 - Redis for caching and message broker
 - Docker and Docker Compose for containerization
 - Swagger/ReDoc API documentation
 - Development tools (Django Debug Toolbar, Silk)
+- Comprehensive test coverage
 
 ## Prerequisites
 
@@ -285,10 +287,14 @@ Bright-Smile-BE/
 │   ├── celery.py          # Celery configuration
 │   └── urls.py            # URL routing
 ├── apps/                  # Django applications
-│   └── core/              # Core app with health check
-│       ├── views.py       # Health check endpoint
-│       ├── serializers.py # API serializers
-│       └── tests.py       # Tests
+│   ├── core/              # Core app with health check
+│   │   ├── views.py       # Health check endpoint
+│   │   ├── serializers.py # API serializers
+│   │   └── tests.py       # Tests
+│   └── users/             # User authentication and management
+│       ├── models.py      # Custom User model
+│       ├── managers.py    # UserManager for user creation
+│       └── tests/         # User model tests
 ├── utils/                 # Utility functions and helpers
 ├── static/                # Static files
 ├── media/                 # User uploads
@@ -339,6 +345,50 @@ docker-compose up -d --scale celery_worker=3
 ```
 
 ## API Endpoints
+
+### Authentication
+
+The application uses a custom user model with email-based authentication.
+
+**User Model Features**:
+- Email as primary authentication field (USERNAME_FIELD)
+- User types: patient, doctor, admin
+- Fields: email, first_name, last_name, user_type
+- Status flags: is_active, is_staff, is_verified
+- Timestamps: last_login, created_at, updated_at
+- Database indexing on frequently queried fields
+
+**Creating Users**:
+```bash
+# Via Django shell
+docker-compose exec web python manage.py shell
+
+from django.contrib.auth import get_user_model
+User = get_user_model()
+
+# Create regular user
+user = User.objects.create_user(
+    email='user@example.com',
+    password='securepass123',
+    first_name='John',
+    last_name='Doe',
+    user_type='patient'
+)
+
+# Create superuser
+superuser = User.objects.create_superuser(
+    email='admin@example.com',
+    password='adminpass123',
+    first_name='Admin',
+    last_name='User',
+    user_type='admin'
+)
+```
+
+**Via Management Command**:
+```bash
+docker-compose exec web python manage.py createsuperuser
+```
 
 ### Health Check
 
