@@ -475,3 +475,198 @@ class FullAuthFlowTestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data['user']['is_verified'])
+
+
+class ChangePasswordTestCase(APITestCase):
+    """Test cases for change password endpoint."""
+
+    def setUp(self):
+        """Set up test data."""
+        self.url = reverse('users:change-password')
+        self.current_password = 'CurrentPass123!'
+        self.new_password = 'NewSecurePass456!'
+        self.user = User.objects.create_user(
+            email='testuser@example.com',
+            password=self.current_password,
+            first_name='Test',
+            last_name='User',
+            user_type='patient',
+            is_active=True
+        )
+        self.refresh_token = RefreshToken.for_user(self.user)
+        self.access_token = self.refresh_token.access_token
+
+    def test_change_password_success(self):
+        """Test successful password change."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'current_password': self.current_password,
+            'new_password': self.new_password,
+            'new_password_confirm': self.new_password
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('message', response.data)
+
+    def test_change_password_updates_password(self):
+        """Test that password is actually updated."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'current_password': self.current_password,
+            'new_password': self.new_password,
+            'new_password_confirm': self.new_password
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Verify old password no longer works
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.check_password(self.current_password))
+
+        # Verify new password works
+        self.assertTrue(self.user.check_password(self.new_password))
+
+    def test_change_password_wrong_current_password(self):
+        """Test change password with wrong current password."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'current_password': 'WrongPassword123!',
+            'new_password': self.new_password,
+            'new_password_confirm': self.new_password
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('current_password', response.data)
+
+    def test_change_password_weak_new_password(self):
+        """Test change password with weak new password."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'current_password': self.current_password,
+            'new_password': '123',
+            'new_password_confirm': '123'
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('new_password', response.data)
+
+    def test_change_password_common_password(self):
+        """Test change password with common password."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'current_password': self.current_password,
+            'new_password': 'password123',
+            'new_password_confirm': 'password123'
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('new_password', response.data)
+
+    def test_change_password_mismatch(self):
+        """Test change password with mismatched new passwords."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'current_password': self.current_password,
+            'new_password': self.new_password,
+            'new_password_confirm': 'DifferentPassword456!'
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('new_password_confirm', response.data)
+
+    def test_change_password_same_as_current(self):
+        """Test change password with new password same as current."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'current_password': self.current_password,
+            'new_password': self.current_password,
+            'new_password_confirm': self.current_password
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('new_password', response.data)
+
+    def test_change_password_requires_authentication(self):
+        """Test that change password requires authentication."""
+        response = self.client.post(self.url, {
+            'current_password': self.current_password,
+            'new_password': self.new_password,
+            'new_password_confirm': self.new_password
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_change_password_missing_current_password(self):
+        """Test change password without current password."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'new_password': self.new_password,
+            'new_password_confirm': self.new_password
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('current_password', response.data)
+
+    def test_change_password_missing_new_password(self):
+        """Test change password without new password."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'current_password': self.current_password,
+            'new_password_confirm': self.new_password
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('new_password', response.data)
+
+    def test_change_password_missing_confirm(self):
+        """Test change password without confirmation."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'current_password': self.current_password,
+            'new_password': self.new_password
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('new_password_confirm', response.data)
+
+    def test_change_password_empty_body(self):
+        """Test change password with empty request body."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {}, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_can_login_with_new_password_after_change(self):
+        """Test that user can login with new password after change."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        # Change password
+        response = self.client.post(self.url, {
+            'current_password': self.current_password,
+            'new_password': self.new_password,
+            'new_password_confirm': self.new_password
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Clear credentials and try to login with new password
+        self.client.credentials()
+        login_url = reverse('users:login')
+        login_response = self.client.post(login_url, {
+            'email': self.user.email,
+            'password': self.new_password
+        }, format='json')
+
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', login_response.data)
