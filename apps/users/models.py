@@ -198,3 +198,43 @@ class Doctor(models.Model):
     def full_name(self):
         """Convenience property to access user's full name."""
         return self.user.get_full_name()
+
+
+class Admin(models.Model):
+    """
+    Admin profile model that extends User through a OneToOne relationship.
+
+    This is a minimal implementation to establish the Admin model structure.
+    This is one of the three user type models in the Bright Smile system.
+    """
+
+    # OneToOne relationship with User - uses user's pk as primary key
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='admin_profile',
+        primary_key=True
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Admin'
+        verbose_name_plural = 'Admins'
+
+    def __str__(self):
+        """Return admin's full name for identification."""
+        return f"Admin: {self.user.get_full_name()}"
+
+    @property
+    def email(self):
+        """Convenience property to access user's email."""
+        return self.user.email
+
+    @property
+    def full_name(self):
+        """Convenience property to access user's full name."""
+        return self.user.get_full_name()
