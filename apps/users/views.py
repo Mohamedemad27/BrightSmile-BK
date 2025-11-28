@@ -8,8 +8,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import EmailVerificationOTP
+from .models import BackupCode, EmailVerificationOTP, TwoFactorAuth, TwoFactorToken
 from .serializers import (
+    BackupCodesResponseSerializer,
     ChangePasswordResponseSerializer,
     ChangePasswordSerializer,
     DoctorRegistrationResponseSerializer,
@@ -21,9 +22,20 @@ from .serializers import (
     OTPResponseSerializer,
     PatientRegistrationResponseSerializer,
     PatientRegistrationSerializer,
+    RegenerateBackupCodesSerializer,
     RequestOTPSerializer,
     TokenRefreshResponseSerializer,
+    TwoFactorDisableResponseSerializer,
+    TwoFactorDisableSerializer,
+    TwoFactorLoginResponseSerializer,
+    TwoFactorLoginSerializer,
+    TwoFactorRequiredResponseSerializer,
+    TwoFactorSetupSerializer,
+    TwoFactorStatusSerializer,
+    TwoFactorVerifySetupResponseSerializer,
+    TwoFactorVerifySetupSerializer,
     UserResponseSerializer,
+    VerifyOTPResponseSerializer,
     VerifyOTPSerializer,
 )
 from .tasks import send_verification_email_task
@@ -290,6 +302,7 @@ class VerifyOTPView(APIView):
     Verify OTP Endpoint
 
     Allows users to verify their email using the OTP code.
+    Returns JWT tokens for auto-login after successful verification.
     """
 
     permission_classes = []  # Public endpoint
@@ -305,23 +318,42 @@ class VerifyOTPView(APIView):
         3. Find valid (non-expired, non-used) OTP for user
         4. Verify OTP against stored hash
         5. Mark OTP as used and user as verified
-        6. Return success message
+        6. Generate JWT tokens for auto-login
+        7. Return tokens and user data
 
         **OTP Validation:**
         - OTP must be exactly 6 digits
         - OTP must not be expired
         - OTP must not have been used before
         - OTP must match the stored hash
+
+        **Auto-Login:**
+        - On successful verification, JWT tokens are returned
+        - User can use these tokens immediately without logging in separately
+        - Access token can be used in Authorization header: `Bearer <access_token>`
         """,
         request_body=VerifyOTPSerializer,
         responses={
             200: openapi.Response(
-                description="Email verified successfully",
-                schema=OTPResponseSerializer,
+                description="Email verified successfully with auto-login tokens",
+                schema=VerifyOTPResponseSerializer,
                 examples={
                     'application/json': {
                         'message': 'Email verified successfully.',
-                        'email': 'user@example.com'
+                        'access': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
+                        'refresh': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
+                        'user': {
+                            'id': 1,
+                            'email': 'user@example.com',
+                            'first_name': 'John',
+                            'last_name': 'Doe',
+                            'full_name': 'John Doe',
+                            'user_type': 'patient',
+                            'is_active': True,
+                            'is_verified': True,
+                            'is_2fa_enabled': False,
+                            'created_at': '2024-01-01T12:00:00Z'
+                        }
                     }
                 }
             ),
@@ -337,7 +369,7 @@ class VerifyOTPView(APIView):
         tags=['Email Verification']
     )
     def post(self, request):
-        """Verify email with OTP."""
+        """Verify email with OTP and return auto-login tokens."""
         serializer = VerifyOTPSerializer(data=request.data)
 
         if serializer.is_valid():
@@ -352,10 +384,26 @@ class VerifyOTPView(APIView):
             user.is_verified = True
             user.save(update_fields=['is_verified'])
 
-            return Response({
-                'message': 'Email verified successfully.',
-                'email': user.email
-            }, status=status.HTTP_200_OK)
+            # Generate JWT tokens for auto-login (only for active users)
+            if user.is_active:
+                refresh = RefreshToken.for_user(user)
+                user.last_login = timezone.now()
+                user.save(update_fields=['last_login'])
+
+                return Response({
+                    'message': 'Email verified successfully.',
+                    'access': str(refresh.access_token),
+                    'refresh': str(refresh),
+                    'user': UserResponseSerializer(user).data
+                }, status=status.HTTP_200_OK)
+            else:
+                # For inactive users (e.g., doctors pending approval), just verify without tokens
+                return Response({
+                    'message': 'Email verified successfully. Your account is pending approval.',
+                    'access': None,
+                    'refresh': None,
+                    'user': UserResponseSerializer(user).data
+                }, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -365,6 +413,7 @@ class LoginView(APIView):
     User Login Endpoint
 
     Authenticates users with email/password and returns JWT tokens.
+    If 2FA is enabled, returns a flag indicating 2FA verification is required.
     """
 
     permission_classes = []  # Public endpoint
@@ -378,9 +427,15 @@ class LoginView(APIView):
         1. Validate email and password
         2. Check user exists and password is correct
         3. Check user account is active
-        4. Generate access and refresh tokens
-        5. Update last_login timestamp
-        6. Return tokens and user data
+        4. If 2FA is enabled, return requires_2fa flag (use /login/2fa/ endpoint)
+        5. If 2FA is not enabled, generate access and refresh tokens
+        6. Update last_login timestamp
+        7. Return tokens and user data
+
+        **Two-Factor Authentication:**
+        - If user has 2FA enabled, response will include `requires_2fa: true`
+        - User must then call `/api/users/login/2fa/` with email and TOTP code
+        - Backup codes can also be used for 2FA verification
 
         **Token Usage:**
         - Include access token in Authorization header: `Bearer <access_token>`
@@ -394,7 +449,7 @@ class LoginView(APIView):
         request_body=LoginSerializer,
         responses={
             200: openapi.Response(
-                description="Login successful",
+                description="Login successful (or 2FA required)",
                 schema=LoginResponseSerializer,
                 examples={
                     'application/json': {
@@ -409,8 +464,20 @@ class LoginView(APIView):
                             'user_type': 'patient',
                             'is_active': True,
                             'is_verified': True,
+                            'is_2fa_enabled': False,
                             'created_at': '2024-01-01T12:00:00Z'
                         }
+                    }
+                }
+            ),
+            202: openapi.Response(
+                description="2FA verification required",
+                schema=TwoFactorRequiredResponseSerializer,
+                examples={
+                    'application/json': {
+                        'requires_2fa': True,
+                        'temp_token': 'a1b2c3d4e5f6...',
+                        'message': 'Two-factor authentication required. Please provide your TOTP code.'
                     }
                 }
             ),
@@ -431,6 +498,16 @@ class LoginView(APIView):
 
         if serializer.is_valid():
             user = serializer.validated_data['user']
+
+            # Check if 2FA is enabled
+            if user.is_2fa_enabled:
+                # Generate temporary token for 2FA verification
+                temp_token = TwoFactorToken.create_for_user(user)
+                return Response({
+                    'requires_2fa': True,
+                    'temp_token': temp_token.token,
+                    'message': 'Two-factor authentication required. Please provide your TOTP code.'
+                }, status=status.HTTP_202_ACCEPTED)
 
             # Generate tokens
             refresh = RefreshToken.for_user(user)
@@ -699,6 +776,537 @@ class ChangePasswordView(APIView):
 
             return Response({
                 'message': 'Password changed successfully.'
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ============================================================================
+# Two-Factor Authentication Views
+# ============================================================================
+
+class TwoFactorSetupView(APIView):
+    """
+    2FA Setup Endpoint
+
+    Initiates 2FA setup by generating a TOTP secret and QR code.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_id='2fa_setup',
+        operation_description="""
+        Initiate Two-Factor Authentication setup.
+
+        **Process:**
+        1. Generate a new TOTP secret for the user
+        2. Create QR code for authenticator app scanning
+        3. Return secret, QR code, and provisioning URI
+        4. User must verify setup with /2fa/verify-setup/ endpoint
+
+        **Setup Flow:**
+        1. Call this endpoint to get secret and QR code
+        2. Scan QR code with authenticator app (Google Authenticator, Authy, etc.)
+        3. Enter the 6-digit code from the app at /2fa/verify-setup/
+        4. Save the backup codes securely
+
+        **Note:**
+        - If user already has 2FA enabled, they must disable it first
+        - The secret is stored encrypted but marked as unverified
+        - 2FA is only active after verification
+        """,
+        responses={
+            200: openapi.Response(
+                description="2FA setup initiated",
+                schema=TwoFactorSetupSerializer,
+                examples={
+                    'application/json': {
+                        'secret': 'JBSWY3DPEHPK3PXP',
+                        'qr_code': 'iVBORw0KGgoAAAANSUhEUgAA...',
+                        'provisioning_uri': 'otpauth://totp/Bright%20Smile:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Bright%20Smile'
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="2FA already enabled",
+                examples={
+                    'application/json': {
+                        'detail': '2FA is already enabled. Disable it first to set up again.'
+                    }
+                }
+            ),
+            401: openapi.Response(
+                description="Authentication required"
+            )
+        },
+        tags=['Two-Factor Authentication'],
+        security=[{'Bearer': []}]
+    )
+    def post(self, request):
+        """Initiate 2FA setup."""
+        user = request.user
+
+        # Check if 2FA is already enabled
+        if user.is_2fa_enabled:
+            return Response({
+                'detail': '2FA is already enabled. Disable it first to set up again.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Create or update 2FA configuration
+        two_factor_auth = TwoFactorAuth.create_for_user(user)
+
+        return Response({
+            'secret': two_factor_auth.secret,
+            'qr_code': two_factor_auth.generate_qr_code_base64(),
+            'provisioning_uri': two_factor_auth.get_provisioning_uri()
+        }, status=status.HTTP_200_OK)
+
+
+class TwoFactorVerifySetupView(APIView):
+    """
+    2FA Verify Setup Endpoint
+
+    Verifies 2FA setup and enables 2FA for the user.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_id='2fa_verify_setup',
+        operation_description="""
+        Verify and complete Two-Factor Authentication setup.
+
+        **Process:**
+        1. Validate the TOTP code from authenticator app
+        2. Mark 2FA as verified and enabled
+        3. Generate backup codes for recovery
+        4. Return backup codes (save these securely!)
+
+        **Important:**
+        - Backup codes are shown only once
+        - Store backup codes in a safe place
+        - Each backup code can only be used once
+        - You will receive 10 backup codes
+        """,
+        request_body=TwoFactorVerifySetupSerializer,
+        responses={
+            200: openapi.Response(
+                description="2FA enabled successfully",
+                schema=TwoFactorVerifySetupResponseSerializer,
+                examples={
+                    'application/json': {
+                        'message': '2FA has been enabled successfully.',
+                        'backup_codes': [
+                            'ABCD1234', 'EFGH5678', 'IJKL9012',
+                            'MNOP3456', 'QRST7890', 'UVWX1234',
+                            'YZAB5678', 'CDEF9012', 'GHIJ3456',
+                            'KLMN7890'
+                        ]
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Invalid code or setup not initiated",
+                examples={
+                    'application/json': {
+                        'code': ['Invalid code. Please try again.']
+                    }
+                }
+            ),
+            401: openapi.Response(
+                description="Authentication required"
+            )
+        },
+        tags=['Two-Factor Authentication'],
+        security=[{'Bearer': []}]
+    )
+    def post(self, request):
+        """Verify 2FA setup and enable 2FA."""
+        serializer = TwoFactorVerifySetupSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+
+        if serializer.is_valid():
+            user = request.user
+            two_factor_auth = serializer.validated_data['two_factor_auth']
+
+            # Mark 2FA as verified
+            two_factor_auth.is_verified = True
+            two_factor_auth.verified_at = timezone.now()
+            two_factor_auth.save(update_fields=['is_verified', 'verified_at'])
+
+            # Enable 2FA on user
+            user.is_2fa_enabled = True
+            user.save(update_fields=['is_2fa_enabled'])
+
+            # Generate backup codes
+            backup_codes = BackupCode.generate_codes_for_user(user)
+
+            return Response({
+                'message': '2FA has been enabled successfully.',
+                'backup_codes': backup_codes
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TwoFactorDisableView(APIView):
+    """
+    2FA Disable Endpoint
+
+    Disables 2FA for the user (requires password and TOTP code).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_id='2fa_disable',
+        operation_description="""
+        Disable Two-Factor Authentication.
+
+        **Process:**
+        1. Verify password
+        2. Verify TOTP code
+        3. Disable 2FA and remove configuration
+        4. Delete all backup codes
+
+        **Security:**
+        - Requires both password and valid TOTP code
+        - This action cannot be undone
+        - User will need to set up 2FA again if desired
+        """,
+        request_body=TwoFactorDisableSerializer,
+        responses={
+            200: openapi.Response(
+                description="2FA disabled successfully",
+                schema=TwoFactorDisableResponseSerializer,
+                examples={
+                    'application/json': {
+                        'message': '2FA has been disabled successfully.'
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Invalid password or code",
+                examples={
+                    'application/json': {
+                        'password': ['Incorrect password.'],
+                        'code': ['Invalid code. Please try again.']
+                    }
+                }
+            ),
+            401: openapi.Response(
+                description="Authentication required"
+            )
+        },
+        tags=['Two-Factor Authentication'],
+        security=[{'Bearer': []}]
+    )
+    def post(self, request):
+        """Disable 2FA."""
+        serializer = TwoFactorDisableSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+
+        if serializer.is_valid():
+            user = request.user
+            two_factor_auth = serializer.validated_data['two_factor_auth']
+
+            # Delete 2FA configuration
+            two_factor_auth.delete()
+
+            # Delete backup codes
+            BackupCode.objects.filter(user=user).delete()
+
+            # Disable 2FA on user
+            user.is_2fa_enabled = False
+            user.save(update_fields=['is_2fa_enabled'])
+
+            return Response({
+                'message': '2FA has been disabled successfully.'
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TwoFactorStatusView(APIView):
+    """
+    2FA Status Endpoint
+
+    Returns the current 2FA status for the authenticated user.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_id='2fa_status',
+        operation_description="""
+        Get the current Two-Factor Authentication status.
+
+        Returns:
+        - Whether 2FA is enabled
+        - Whether setup is pending verification
+        - Number of remaining backup codes
+        """,
+        responses={
+            200: openapi.Response(
+                description="2FA status",
+                schema=TwoFactorStatusSerializer,
+                examples={
+                    'application/json': {
+                        'is_enabled': True,
+                        'is_setup_pending': False,
+                        'backup_codes_remaining': 8
+                    }
+                }
+            ),
+            401: openapi.Response(
+                description="Authentication required"
+            )
+        },
+        tags=['Two-Factor Authentication'],
+        security=[{'Bearer': []}]
+    )
+    def get(self, request):
+        """Get 2FA status."""
+        user = request.user
+
+        is_setup_pending = False
+        try:
+            two_factor_auth = user.two_factor_auth
+            is_setup_pending = not two_factor_auth.is_verified
+        except TwoFactorAuth.DoesNotExist:
+            pass
+
+        return Response({
+            'is_enabled': user.is_2fa_enabled,
+            'is_setup_pending': is_setup_pending,
+            'backup_codes_remaining': BackupCode.get_unused_count(user)
+        }, status=status.HTTP_200_OK)
+
+
+class BackupCodesView(APIView):
+    """
+    Backup Codes Endpoint
+
+    Returns unused backup codes count or regenerates backup codes.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_id='get_backup_codes',
+        operation_description="""
+        Get backup codes information.
+
+        **Note:**
+        - For security, this endpoint only returns the count of unused codes
+        - To see the actual codes, regenerate them using POST
+        - Each code can only be used once
+        """,
+        responses={
+            200: openapi.Response(
+                description="Backup codes info",
+                schema=BackupCodesResponseSerializer,
+                examples={
+                    'application/json': {
+                        'backup_codes': [],
+                        'unused_count': 8
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="2FA not enabled",
+                examples={
+                    'application/json': {
+                        'detail': '2FA is not enabled for this account.'
+                    }
+                }
+            ),
+            401: openapi.Response(
+                description="Authentication required"
+            )
+        },
+        tags=['Two-Factor Authentication'],
+        security=[{'Bearer': []}]
+    )
+    def get(self, request):
+        """Get backup codes count."""
+        user = request.user
+
+        if not user.is_2fa_enabled:
+            return Response({
+                'detail': '2FA is not enabled for this account.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'backup_codes': [],  # Don't expose codes for security
+            'unused_count': BackupCode.get_unused_count(user)
+        }, status=status.HTTP_200_OK)
+
+    @swagger_auto_schema(
+        operation_id='regenerate_backup_codes',
+        operation_description="""
+        Regenerate backup codes.
+
+        **Process:**
+        1. Verify password
+        2. Delete all existing backup codes
+        3. Generate 10 new backup codes
+        4. Return new codes (save these securely!)
+
+        **Important:**
+        - This invalidates all previous backup codes
+        - New codes are shown only once
+        - Store codes in a safe place
+        """,
+        request_body=RegenerateBackupCodesSerializer,
+        responses={
+            200: openapi.Response(
+                description="Backup codes regenerated",
+                schema=BackupCodesResponseSerializer,
+                examples={
+                    'application/json': {
+                        'backup_codes': [
+                            'ABCD1234', 'EFGH5678', 'IJKL9012',
+                            'MNOP3456', 'QRST7890', 'UVWX1234',
+                            'YZAB5678', 'CDEF9012', 'GHIJ3456',
+                            'KLMN7890'
+                        ],
+                        'unused_count': 10
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Invalid password or 2FA not enabled",
+                examples={
+                    'application/json': {
+                        'password': ['Incorrect password.']
+                    }
+                }
+            ),
+            401: openapi.Response(
+                description="Authentication required"
+            )
+        },
+        tags=['Two-Factor Authentication'],
+        security=[{'Bearer': []}]
+    )
+    def post(self, request):
+        """Regenerate backup codes."""
+        serializer = RegenerateBackupCodesSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+
+        if serializer.is_valid():
+            user = request.user
+
+            # Generate new backup codes
+            backup_codes = BackupCode.generate_codes_for_user(user)
+
+            return Response({
+                'backup_codes': backup_codes,
+                'unused_count': len(backup_codes)
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TwoFactorLoginView(APIView):
+    """
+    2FA Login Verification Endpoint
+
+    Completes login for users with 2FA enabled using temporary token.
+    """
+
+    permission_classes = []  # Public endpoint
+
+    @swagger_auto_schema(
+        operation_id='2fa_login',
+        operation_description="""
+        Complete login with Two-Factor Authentication.
+
+        **Process:**
+        1. User first calls /login/ with email and password
+        2. If 2FA is enabled, /login/ returns `requires_2fa: true` and a `temp_token`
+        3. User calls this endpoint with temp_token and TOTP code
+        4. On success, returns JWT tokens
+
+        **Temporary Token:**
+        - Valid for 5 minutes only
+        - Can only be used once
+        - Must be obtained from /login/ endpoint
+
+        **Code Types:**
+        - 6-digit TOTP code from authenticator app
+        - 8-character backup code (for recovery)
+
+        **Note:**
+        - Backup codes can only be used once
+        - After using a backup code, it's marked as used
+        """,
+        request_body=TwoFactorLoginSerializer,
+        responses={
+            200: openapi.Response(
+                description="Login successful",
+                schema=TwoFactorLoginResponseSerializer,
+                examples={
+                    'application/json': {
+                        'access': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
+                        'refresh': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
+                        'user': {
+                            'id': 1,
+                            'email': 'user@example.com',
+                            'first_name': 'John',
+                            'last_name': 'Doe',
+                            'full_name': 'John Doe',
+                            'user_type': 'patient',
+                            'is_active': True,
+                            'is_verified': True,
+                            'is_2fa_enabled': True,
+                            'created_at': '2024-01-01T12:00:00Z'
+                        }
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Invalid token or code",
+                examples={
+                    'application/json': {
+                        'temp_token': ['Invalid or expired token. Please login again.'],
+                        'code': ['Invalid code. Please try again.']
+                    }
+                }
+            )
+        },
+        tags=['Authentication']
+    )
+    def post(self, request):
+        """Complete 2FA login."""
+        serializer = TwoFactorLoginSerializer(data=request.data)
+
+        if serializer.is_valid():
+            user = serializer.validated_data['user']
+            temp_token_str = serializer.validated_data['temp_token_str']
+
+            # Invalidate the temp token
+            TwoFactorToken.get_and_invalidate(temp_token_str)
+
+            # Generate tokens
+            refresh = RefreshToken.for_user(user)
+
+            # Update last_login
+            user.last_login = timezone.now()
+            user.save(update_fields=['last_login'])
+
+            return Response({
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': UserResponseSerializer(user).data
             }, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

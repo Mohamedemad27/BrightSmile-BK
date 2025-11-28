@@ -269,7 +269,7 @@ class VerifyOTPViewTestCase(APITestCase):
         self.otp_instance, self.otp_plain = EmailVerificationOTP.create_for_user(self.user)
 
     def test_verify_otp_success(self):
-        """Test successful OTP verification."""
+        """Test successful OTP verification returns auto-login tokens."""
         response = self.client.post(self.url, {
             'email': self.user.email,
             'otp': self.otp_plain
@@ -277,6 +277,23 @@ class VerifyOTPViewTestCase(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('message', response.data)
+        self.assertIn('access', response.data)
+        self.assertIn('refresh', response.data)
+        self.assertIn('user', response.data)
+        # Active user should get tokens
+        self.assertIsNotNone(response.data['access'])
+        self.assertIsNotNone(response.data['refresh'])
+
+    def test_verify_otp_returns_user_data(self):
+        """Test that successful verification returns user data."""
+        response = self.client.post(self.url, {
+            'email': self.user.email,
+            'otp': self.otp_plain
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['user']['email'], self.user.email)
+        self.assertTrue(response.data['user']['is_verified'])
 
     def test_verify_otp_marks_user_verified(self):
         """Test that successful verification marks user as verified."""
@@ -385,6 +402,34 @@ class VerifyOTPViewTestCase(APITestCase):
         }, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_verify_otp_inactive_user_no_tokens(self):
+        """Test that inactive users get verified but don't receive tokens."""
+        # Create inactive user (like a doctor pending approval)
+        inactive_user = User.objects.create_user(
+            email='doctor@example.com',
+            password='SecurePass123!',
+            first_name='Doctor',
+            last_name='Test',
+            user_type='doctor',
+            is_active=False,
+            is_verified=False
+        )
+        otp_instance, otp_plain = EmailVerificationOTP.create_for_user(inactive_user)
+
+        response = self.client.post(self.url, {
+            'email': inactive_user.email,
+            'otp': otp_plain
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # User should be verified
+        inactive_user.refresh_from_db()
+        self.assertTrue(inactive_user.is_verified)
+        # But should not receive tokens
+        self.assertIsNone(response.data['access'])
+        self.assertIsNone(response.data['refresh'])
+        self.assertIn('pending approval', response.data['message'])
 
     def test_verify_otp_uses_latest_otp(self):
         """Test that verification uses the latest OTP."""
