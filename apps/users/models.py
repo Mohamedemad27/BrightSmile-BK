@@ -1,5 +1,9 @@
+from datetime import date
+
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
+
+from utils.validators import phone_number_validator, validate_date_of_birth
 from .managers import UserManager
 
 
@@ -74,3 +78,73 @@ class User(AbstractBaseUser, PermissionsMixin):
             str: User's first name
         """
         return self.first_name
+
+
+class Patient(models.Model):
+    """
+    Patient profile model that extends User through a OneToOne relationship.
+
+    Stores patient-specific information including date of birth and phone number.
+    This is one of the three user type models in the Bright Smile system.
+    """
+
+    # OneToOne relationship with User - uses user's pk as primary key
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='patient_profile',
+        primary_key=True
+    )
+
+    # Patient-specific fields
+    date_of_birth = models.DateField(
+        validators=[validate_date_of_birth],
+        db_index=True
+    )
+    phone_number = models.CharField(
+        max_length=20,
+        validators=[phone_number_validator],
+        db_index=True
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Patient'
+        verbose_name_plural = 'Patients'
+        indexes = [
+            models.Index(
+                fields=['date_of_birth', 'phone_number'],
+                name='patient_dob_phone_idx'
+            ),
+        ]
+
+    def __str__(self):
+        """Return patient's full name and email for identification."""
+        return f"Patient: {self.user.get_full_name()} ({self.user.email})"
+
+    @property
+    def age(self):
+        """
+        Calculate the patient's current age from date of birth.
+
+        Returns:
+            int: Patient's age in years
+        """
+        today = date.today()
+        return today.year - self.date_of_birth.year - (
+            (today.month, today.day) < (self.date_of_birth.month, self.date_of_birth.day)
+        )
+
+    @property
+    def email(self):
+        """Convenience property to access user's email."""
+        return self.user.email
+
+    @property
+    def full_name(self):
+        """Convenience property to access user's full name."""
+        return self.user.get_full_name()
