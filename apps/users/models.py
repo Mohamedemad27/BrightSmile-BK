@@ -1,7 +1,11 @@
-from datetime import date
+import secrets
+from datetime import date, timedelta
 
+from django.conf import settings
+from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
+from django.utils import timezone
 
 from utils.validators import phone_number_validator, validate_date_of_birth
 from .managers import UserManager
@@ -238,3 +242,104 @@ class Admin(models.Model):
     def full_name(self):
         """Convenience property to access user's full name."""
         return self.user.get_full_name()
+
+
+class EmailVerificationOTP(models.Model):
+    """
+    Model to store email verification OTPs.
+
+    Stores both hashed OTP for verification and plain OTP for admin visibility.
+    OTPs are also cached in Redis for fast lookups with configurable expiration.
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='verification_otps'
+    )
+    otp_hash = models.CharField(
+        max_length=128,
+        help_text="Hashed OTP for secure verification"
+    )
+    otp_plain = models.CharField(
+        max_length=6,
+        help_text="Plain OTP for admin display only"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Email Verification OTP'
+        verbose_name_plural = 'Email Verification OTPs'
+        indexes = [
+            models.Index(fields=['user', 'is_used'], name='otp_user_used_idx'),
+            models.Index(fields=['expires_at'], name='otp_expires_idx'),
+        ]
+
+    def __str__(self):
+        return f"OTP for {self.user.email} - {'Used' if self.is_used else 'Active'}"
+
+    def save(self, *args, **kwargs):
+        """Set expires_at if not already set."""
+        if not self.expires_at:
+            expiry_minutes = getattr(settings, 'OTP_EXPIRY_MINUTES', 5)
+            self.expires_at = timezone.now() + timedelta(minutes=expiry_minutes)
+        super().save(*args, **kwargs)
+
+    @property
+    def is_expired(self):
+        """Check if OTP has expired."""
+        return timezone.now() > self.expires_at
+
+    @property
+    def is_valid(self):
+        """Check if OTP is still valid (not used and not expired)."""
+        return not self.is_used and not self.is_expired
+
+    def verify(self, otp):
+        """
+        Verify the provided OTP against the stored hash.
+
+        Args:
+            otp: The plain text OTP to verify
+
+        Returns:
+            bool: True if OTP is valid and matches, False otherwise
+        """
+        if not self.is_valid:
+            return False
+        return check_password(otp, self.otp_hash)
+
+    @classmethod
+    def generate_otp(cls):
+        """
+        Generate a cryptographically secure 6-digit OTP.
+
+        Returns:
+            str: 6-digit OTP string
+        """
+        return ''.join(str(secrets.randbelow(10)) for _ in range(6))
+
+    @classmethod
+    def create_for_user(cls, user):
+        """
+        Create a new OTP for a user.
+
+        Args:
+            user: The user to create OTP for
+
+        Returns:
+            tuple: (EmailVerificationOTP instance, plain OTP string)
+        """
+        otp_plain = cls.generate_otp()
+        otp_hash = make_password(otp_plain)
+
+        otp_instance = cls.objects.create(
+            user=user,
+            otp_hash=otp_hash,
+            otp_plain=otp_plain,
+        )
+
+        return otp_instance, otp_plain

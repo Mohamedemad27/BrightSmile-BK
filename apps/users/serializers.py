@@ -2,10 +2,11 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 
 from utils.validators import phone_number_validator, validate_date_of_birth
-from .models import Doctor, Patient
+from .models import Doctor, EmailVerificationOTP, Patient
 
 User = get_user_model()
 
@@ -249,3 +250,109 @@ class DoctorRegistrationResponseSerializer(serializers.Serializer):
 
     message = serializers.CharField(help_text="Success message with approval notice")
     user = UserResponseSerializer(help_text="Created user data")
+
+
+class RequestOTPSerializer(serializers.Serializer):
+    """Serializer for requesting a new OTP."""
+
+    email = serializers.EmailField(
+        help_text="Email address to send OTP to"
+    )
+
+    def validate_email(self, value):
+        """Validate email exists and user is not already verified."""
+        email = value.lower()
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("No account found with this email address.")
+
+        if user.is_verified:
+            raise serializers.ValidationError("This email is already verified.")
+
+        # Check for existing valid OTP (cooldown)
+        existing_otp = EmailVerificationOTP.objects.filter(
+            user=user,
+            is_used=False,
+            expires_at__gt=timezone.now()
+        ).first()
+
+        if existing_otp:
+            remaining_seconds = (existing_otp.expires_at - timezone.now()).total_seconds()
+            remaining_minutes = int(remaining_seconds // 60)
+            remaining_secs = int(remaining_seconds % 60)
+            raise serializers.ValidationError(
+                f"An OTP was recently sent. Please wait {remaining_minutes}m {remaining_secs}s before requesting a new one."
+            )
+
+        return email
+
+
+class VerifyOTPSerializer(serializers.Serializer):
+    """Serializer for verifying an OTP."""
+
+    email = serializers.EmailField(
+        help_text="Email address to verify"
+    )
+    otp = serializers.CharField(
+        min_length=6,
+        max_length=6,
+        help_text="6-digit OTP code"
+    )
+
+    def validate_email(self, value):
+        """Validate email exists."""
+        email = value.lower()
+        try:
+            User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("No account found with this email address.")
+        return email
+
+    def validate_otp(self, value):
+        """Validate OTP is numeric."""
+        if not value.isdigit():
+            raise serializers.ValidationError("OTP must contain only digits.")
+        return value
+
+    def validate(self, attrs):
+        """Validate OTP against stored hash."""
+        email = attrs['email']
+        otp = attrs['otp']
+
+        user = User.objects.get(email__iexact=email)
+
+        if user.is_verified:
+            raise serializers.ValidationError({
+                'email': "This email is already verified."
+            })
+
+        # Find valid OTP for user
+        otp_instance = EmailVerificationOTP.objects.filter(
+            user=user,
+            is_used=False,
+            expires_at__gt=timezone.now()
+        ).order_by('-created_at').first()
+
+        if not otp_instance:
+            raise serializers.ValidationError({
+                'otp': "No valid OTP found. Please request a new one."
+            })
+
+        if not otp_instance.verify(otp):
+            raise serializers.ValidationError({
+                'otp': "Invalid OTP code."
+            })
+
+        # Store verified OTP instance for use in view
+        attrs['otp_instance'] = otp_instance
+        attrs['user'] = user
+
+        return attrs
+
+
+class OTPResponseSerializer(serializers.Serializer):
+    """Serializer for OTP request/verify responses."""
+
+    message = serializers.CharField(help_text="Response message")
+    email = serializers.EmailField(help_text="Email address")
