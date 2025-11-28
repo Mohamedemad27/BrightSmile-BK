@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from .models import Admin as AdminModel, Doctor, Patient, User
+from .models import Admin as AdminModel, Doctor, EmailVerificationOTP, Patient, User
 
 
 @admin.register(User)
@@ -141,3 +141,44 @@ class AdminProfileAdmin(admin.ModelAdmin):
     def get_is_staff(self, obj):
         """Return the admin's staff status."""
         return obj.user.is_staff
+
+
+@admin.register(EmailVerificationOTP)
+class EmailVerificationOTPAdmin(admin.ModelAdmin):
+    """Admin configuration for the EmailVerificationOTP model."""
+
+    list_display = [
+        'get_email',
+        'otp_plain',
+        'is_used',
+        'is_expired_display',
+        'created_at',
+        'expires_at',
+    ]
+    list_filter = ['is_used', 'created_at', 'expires_at']
+    search_fields = ['user__email', 'otp_plain']
+    ordering = ['-created_at']
+    readonly_fields = ['otp_hash', 'otp_plain', 'created_at', 'is_expired_display', 'is_valid_display']
+    raw_id_fields = ['user']
+
+    fieldsets = (
+        ('User Information', {'fields': ('user',)}),
+        ('OTP Details', {'fields': ('otp_plain', 'otp_hash', 'is_used')}),
+        ('Validity', {'fields': ('expires_at', 'is_expired_display', 'is_valid_display')}),
+        ('Timestamps', {'fields': ('created_at',)}),
+    )
+
+    @admin.display(description='Email', ordering='user__email')
+    def get_email(self, obj):
+        """Return the user's email."""
+        return obj.user.email
+
+    @admin.display(description='Expired', boolean=True)
+    def is_expired_display(self, obj):
+        """Return whether the OTP is expired."""
+        return obj.is_expired
+
+    @admin.display(description='Valid', boolean=True)
+    def is_valid_display(self, obj):
+        """Return whether the OTP is valid (not used and not expired)."""
+        return obj.is_valid

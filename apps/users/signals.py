@@ -1,11 +1,35 @@
+import logging
+
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+
+logger = logging.getLogger(__name__)
+
+
+def send_verification_otp(user):
+    """
+    Helper function to create OTP and send verification email.
+
+    Args:
+        user: The User instance to send OTP to
+    """
+    from apps.users.models import EmailVerificationOTP
+    from apps.users.tasks import send_verification_email_task
+
+    # Create OTP for user
+    otp_instance, otp_plain = EmailVerificationOTP.create_for_user(user)
+
+    # Send email via Celery background task
+    send_verification_email_task.delay(user.id, otp_plain)
+
+    logger.info(f"Verification OTP sent to {user.email}")
 
 
 @receiver(post_save, sender='users.Patient')
 def set_patient_user_type(sender, instance, created, **kwargs):
     """
     Signal handler to automatically set user.user_type='patient' when a Patient is created.
+    Also sends verification OTP email.
 
     Args:
         sender: The model class (Patient)
@@ -13,15 +37,20 @@ def set_patient_user_type(sender, instance, created, **kwargs):
         created: Boolean indicating if this is a new instance
         **kwargs: Additional keyword arguments
     """
-    if created and instance.user.user_type != 'patient':
-        instance.user.user_type = 'patient'
-        instance.user.save(update_fields=['user_type'])
+    if created:
+        if instance.user.user_type != 'patient':
+            instance.user.user_type = 'patient'
+            instance.user.save(update_fields=['user_type'])
+
+        # Send verification OTP email
+        send_verification_otp(instance.user)
 
 
 @receiver(post_save, sender='users.Doctor')
 def set_doctor_user_type(sender, instance, created, **kwargs):
     """
     Signal handler to automatically set user.user_type='doctor' when a Doctor is created.
+    Also sends verification OTP email.
 
     Args:
         sender: The model class (Doctor)
@@ -29,9 +58,13 @@ def set_doctor_user_type(sender, instance, created, **kwargs):
         created: Boolean indicating if this is a new instance
         **kwargs: Additional keyword arguments
     """
-    if created and instance.user.user_type != 'doctor':
-        instance.user.user_type = 'doctor'
-        instance.user.save(update_fields=['user_type'])
+    if created:
+        if instance.user.user_type != 'doctor':
+            instance.user.user_type = 'doctor'
+            instance.user.save(update_fields=['user_type'])
+
+        # Send verification OTP email
+        send_verification_otp(instance.user)
 
 
 @receiver(post_save, sender='users.Admin')
