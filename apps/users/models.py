@@ -148,3 +148,53 @@ class Patient(models.Model):
     def full_name(self):
         """Convenience property to access user's full name."""
         return self.user.get_full_name()
+
+
+class Doctor(models.Model):
+    """
+    Doctor profile model that extends User through a OneToOne relationship.
+
+    Stores doctor-specific information including phone number.
+    This is one of the three user type models in the Bright Smile system.
+    """
+
+    # OneToOne relationship with User - uses user's pk as primary key
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='doctor_profile',
+        primary_key=True
+    )
+
+    # Doctor-specific fields
+    phone_number = models.CharField(
+        max_length=20,
+        validators=[phone_number_validator],
+        db_index=True
+    )
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Doctor'
+        verbose_name_plural = 'Doctors'
+        indexes = [
+            models.Index(fields=['phone_number'], name='doctor_phone_idx'),
+        ]
+
+    def __str__(self):
+        """Return doctor's full name for identification."""
+        return f"Doctor: {self.user.get_full_name()}"
+
+    @property
+    def email(self):
+        """Convenience property to access user's email."""
+        return self.user.email
+
+    @property
+    def full_name(self):
+        """Convenience property to access user's full name."""
+        return self.user.get_full_name()

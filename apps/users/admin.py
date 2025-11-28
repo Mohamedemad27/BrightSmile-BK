@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from .models import Patient, User
+from .models import Doctor, Patient, User
 
 
 @admin.register(User)
@@ -70,4 +70,37 @@ class PatientAdmin(admin.ModelAdmin):
     @admin.display(description='Full Name', ordering='user__first_name')
     def get_full_name(self, obj):
         """Return the patient's full name."""
+        return obj.user.get_full_name()
+
+
+@admin.register(Doctor)
+class DoctorAdmin(admin.ModelAdmin):
+    """Admin configuration for the Doctor model."""
+
+    list_display = [
+        'get_email',
+        'get_full_name',
+        'phone_number',
+        'created_at',
+    ]
+    list_filter = ['created_at']
+    search_fields = ['user__email', 'user__first_name', 'user__last_name', 'phone_number']
+    ordering = ['-created_at']
+    readonly_fields = ['created_at', 'updated_at']
+    raw_id_fields = ['user']
+
+    fieldsets = (
+        ('User Information', {'fields': ('user',)}),
+        ('Doctor Details', {'fields': ('phone_number',)}),
+        ('Timestamps', {'fields': ('created_at', 'updated_at')}),
+    )
+
+    @admin.display(description='Email', ordering='user__email')
+    def get_email(self, obj):
+        """Return the doctor's email."""
+        return obj.user.email
+
+    @admin.display(description='Full Name', ordering='user__first_name')
+    def get_full_name(self, obj):
+        """Return the doctor's full name."""
         return obj.user.get_full_name()
