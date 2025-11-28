@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from .models import Doctor, Patient, User
+from .models import Admin as AdminModel, Doctor, Patient, User
 
 
 @admin.register(User)
@@ -104,3 +104,40 @@ class DoctorAdmin(admin.ModelAdmin):
     def get_full_name(self, obj):
         """Return the doctor's full name."""
         return obj.user.get_full_name()
+
+
+@admin.register(AdminModel)
+class AdminProfileAdmin(admin.ModelAdmin):
+    """Admin configuration for the Admin model."""
+
+    list_display = [
+        'get_email',
+        'get_full_name',
+        'get_is_staff',
+        'created_at',
+    ]
+    list_filter = ['created_at']
+    search_fields = ['user__email', 'user__first_name', 'user__last_name']
+    ordering = ['-created_at']
+    readonly_fields = ['created_at', 'updated_at']
+    raw_id_fields = ['user']
+
+    fieldsets = (
+        ('User Information', {'fields': ('user',)}),
+        ('Timestamps', {'fields': ('created_at', 'updated_at')}),
+    )
+
+    @admin.display(description='Email', ordering='user__email')
+    def get_email(self, obj):
+        """Return the admin's email."""
+        return obj.user.email
+
+    @admin.display(description='Full Name', ordering='user__first_name')
+    def get_full_name(self, obj):
+        """Return the admin's full name."""
+        return obj.user.get_full_name()
+
+    @admin.display(description='Staff Status', boolean=True)
+    def get_is_staff(self, obj):
+        """Return the admin's staff status."""
+        return obj.user.is_staff
