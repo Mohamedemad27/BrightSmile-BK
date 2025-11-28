@@ -39,6 +39,7 @@ urlpatterns = [
 
     # API
     path('api/', include('apps.core.urls')),
+    path('api/users/', include('apps.users.urls')),
 
     # Docs
     re_path(r'^swagger/$', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
