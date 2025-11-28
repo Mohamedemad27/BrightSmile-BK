@@ -27,3 +27,6 @@ six==1.17.0
 sqlparse==0.5.3
 uritemplate==4.2.0
 urllib3==2.5.0
+pyotp==2.9.0
+qrcode[pil]==8.0
+cryptography==44.0.0

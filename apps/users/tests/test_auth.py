@@ -3,6 +3,9 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
+import pyotp
+
+from apps.users.models import BackupCode, TwoFactorAuth, TwoFactorToken
 
 User = get_user_model()
 
@@ -670,3 +673,700 @@ class ChangePasswordTestCase(APITestCase):
 
         self.assertEqual(login_response.status_code, status.HTTP_200_OK)
         self.assertIn('access', login_response.data)
+
+
+# ============================================================================
+# Two-Factor Authentication Tests
+# ============================================================================
+
+class TwoFactorSetupTestCase(APITestCase):
+    """Test cases for 2FA setup endpoint."""
+
+    def setUp(self):
+        """Set up test data."""
+        self.url = reverse('users:2fa-setup')
+        self.password = 'SecurePass123!'
+        self.user = User.objects.create_user(
+            email='testuser@example.com',
+            password=self.password,
+            first_name='Test',
+            last_name='User',
+            user_type='patient',
+            is_active=True
+        )
+        self.refresh_token = RefreshToken.for_user(self.user)
+        self.access_token = self.refresh_token.access_token
+
+    def test_setup_2fa_success(self):
+        """Test successful 2FA setup initiation."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('secret', response.data)
+        self.assertIn('qr_code', response.data)
+        self.assertIn('provisioning_uri', response.data)
+
+    def test_setup_2fa_creates_record(self):
+        """Test that 2FA setup creates a TwoFactorAuth record."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(TwoFactorAuth.objects.filter(user=self.user).exists())
+        two_factor = TwoFactorAuth.objects.get(user=self.user)
+        self.assertFalse(two_factor.is_verified)
+
+    def test_setup_2fa_requires_authentication(self):
+        """Test that 2FA setup requires authentication."""
+        response = self.client.post(self.url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_setup_2fa_already_enabled(self):
+        """Test that 2FA setup fails if already enabled."""
+        self.user.is_2fa_enabled = True
+        self.user.save()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('detail', response.data)
+
+    def test_setup_2fa_returns_valid_secret(self):
+        """Test that returned secret is valid TOTP secret."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Try to create TOTP with the secret
+        totp = pyotp.TOTP(response.data['secret'])
+        code = totp.now()
+        self.assertEqual(len(code), 6)
+        self.assertTrue(code.isdigit())
+
+
+class TwoFactorVerifySetupTestCase(APITestCase):
+    """Test cases for 2FA verify setup endpoint."""
+
+    def setUp(self):
+        """Set up test data."""
+        self.url = reverse('users:2fa-verify-setup')
+        self.password = 'SecurePass123!'
+        self.user = User.objects.create_user(
+            email='testuser@example.com',
+            password=self.password,
+            first_name='Test',
+            last_name='User',
+            user_type='patient',
+            is_active=True
+        )
+        self.refresh_token = RefreshToken.for_user(self.user)
+        self.access_token = self.refresh_token.access_token
+        # Create 2FA setup
+        self.two_factor = TwoFactorAuth.create_for_user(self.user)
+
+    def test_verify_setup_success(self):
+        """Test successful 2FA verification."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+        totp = pyotp.TOTP(self.two_factor.secret)
+
+        response = self.client.post(self.url, {
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('message', response.data)
+        self.assertIn('backup_codes', response.data)
+        self.assertEqual(len(response.data['backup_codes']), 10)
+
+    def test_verify_setup_enables_2fa(self):
+        """Test that verification enables 2FA on user."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+        totp = pyotp.TOTP(self.two_factor.secret)
+
+        response = self.client.post(self.url, {
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.is_2fa_enabled)
+        self.two_factor.refresh_from_db()
+        self.assertTrue(self.two_factor.is_verified)
+
+    def test_verify_setup_invalid_code(self):
+        """Test verification with invalid code."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'code': '000000'
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('code', response.data)
+
+    def test_verify_setup_no_setup(self):
+        """Test verification without prior setup."""
+        self.two_factor.delete()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'code': '123456'
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('detail', response.data)
+
+    def test_verify_setup_already_verified(self):
+        """Test verification when already verified."""
+        self.two_factor.is_verified = True
+        self.two_factor.save()
+        self.user.is_2fa_enabled = True
+        self.user.save()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+        totp = pyotp.TOTP(self.two_factor.secret)
+
+        response = self.client.post(self.url, {
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('detail', response.data)
+
+    def test_verify_setup_requires_authentication(self):
+        """Test that verification requires authentication."""
+        response = self.client.post(self.url, {
+            'code': '123456'
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class TwoFactorDisableTestCase(APITestCase):
+    """Test cases for 2FA disable endpoint."""
+
+    def setUp(self):
+        """Set up test data."""
+        self.url = reverse('users:2fa-disable')
+        self.password = 'SecurePass123!'
+        self.user = User.objects.create_user(
+            email='testuser@example.com',
+            password=self.password,
+            first_name='Test',
+            last_name='User',
+            user_type='patient',
+            is_active=True,
+            is_2fa_enabled=True
+        )
+        self.refresh_token = RefreshToken.for_user(self.user)
+        self.access_token = self.refresh_token.access_token
+        # Create verified 2FA
+        self.two_factor = TwoFactorAuth.create_for_user(self.user)
+        self.two_factor.is_verified = True
+        self.two_factor.save()
+        # Create backup codes
+        BackupCode.generate_codes_for_user(self.user)
+
+    def test_disable_2fa_success(self):
+        """Test successful 2FA disable."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+        totp = pyotp.TOTP(self.two_factor.secret)
+
+        response = self.client.post(self.url, {
+            'password': self.password,
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('message', response.data)
+
+    def test_disable_2fa_removes_records(self):
+        """Test that disabling 2FA removes all records."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+        totp = pyotp.TOTP(self.two_factor.secret)
+
+        response = self.client.post(self.url, {
+            'password': self.password,
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.is_2fa_enabled)
+        self.assertFalse(TwoFactorAuth.objects.filter(user=self.user).exists())
+        self.assertFalse(BackupCode.objects.filter(user=self.user).exists())
+
+    def test_disable_2fa_wrong_password(self):
+        """Test disable with wrong password."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+        totp = pyotp.TOTP(self.two_factor.secret)
+
+        response = self.client.post(self.url, {
+            'password': 'WrongPassword123!',
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('password', response.data)
+
+    def test_disable_2fa_wrong_code(self):
+        """Test disable with wrong TOTP code."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'password': self.password,
+            'code': '000000'
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('code', response.data)
+
+    def test_disable_2fa_not_enabled(self):
+        """Test disable when 2FA is not enabled."""
+        self.user.is_2fa_enabled = False
+        self.user.save()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'password': self.password,
+            'code': '123456'
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('detail', response.data)
+
+    def test_disable_2fa_requires_authentication(self):
+        """Test that disable requires authentication."""
+        response = self.client.post(self.url, {
+            'password': self.password,
+            'code': '123456'
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class TwoFactorStatusTestCase(APITestCase):
+    """Test cases for 2FA status endpoint."""
+
+    def setUp(self):
+        """Set up test data."""
+        self.url = reverse('users:2fa-status')
+        self.password = 'SecurePass123!'
+        self.user = User.objects.create_user(
+            email='testuser@example.com',
+            password=self.password,
+            first_name='Test',
+            last_name='User',
+            user_type='patient',
+            is_active=True
+        )
+        self.refresh_token = RefreshToken.for_user(self.user)
+        self.access_token = self.refresh_token.access_token
+
+    def test_status_2fa_disabled(self):
+        """Test status when 2FA is disabled."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.get(self.url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['is_enabled'])
+        self.assertFalse(response.data['is_setup_pending'])
+        self.assertEqual(response.data['backup_codes_remaining'], 0)
+
+    def test_status_2fa_setup_pending(self):
+        """Test status when 2FA setup is pending."""
+        TwoFactorAuth.create_for_user(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.get(self.url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data['is_enabled'])
+        self.assertTrue(response.data['is_setup_pending'])
+
+    def test_status_2fa_enabled(self):
+        """Test status when 2FA is enabled."""
+        self.user.is_2fa_enabled = True
+        self.user.save()
+        two_factor = TwoFactorAuth.create_for_user(self.user)
+        two_factor.is_verified = True
+        two_factor.save()
+        BackupCode.generate_codes_for_user(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.get(self.url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data['is_enabled'])
+        self.assertFalse(response.data['is_setup_pending'])
+        self.assertEqual(response.data['backup_codes_remaining'], 10)
+
+    def test_status_requires_authentication(self):
+        """Test that status requires authentication."""
+        response = self.client.get(self.url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class BackupCodesTestCase(APITestCase):
+    """Test cases for backup codes endpoint."""
+
+    def setUp(self):
+        """Set up test data."""
+        self.url = reverse('users:2fa-backup-codes')
+        self.password = 'SecurePass123!'
+        self.user = User.objects.create_user(
+            email='testuser@example.com',
+            password=self.password,
+            first_name='Test',
+            last_name='User',
+            user_type='patient',
+            is_active=True,
+            is_2fa_enabled=True
+        )
+        self.refresh_token = RefreshToken.for_user(self.user)
+        self.access_token = self.refresh_token.access_token
+        # Create 2FA and backup codes
+        two_factor = TwoFactorAuth.create_for_user(self.user)
+        two_factor.is_verified = True
+        two_factor.save()
+        BackupCode.generate_codes_for_user(self.user)
+
+    def test_get_backup_codes_count(self):
+        """Test getting backup codes count."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.get(self.url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['unused_count'], 10)
+        self.assertEqual(response.data['backup_codes'], [])  # Codes not exposed
+
+    def test_regenerate_backup_codes(self):
+        """Test regenerating backup codes."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'password': self.password
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['backup_codes']), 10)
+        self.assertEqual(response.data['unused_count'], 10)
+
+    def test_regenerate_backup_codes_wrong_password(self):
+        """Test regenerating backup codes with wrong password."""
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.post(self.url, {
+            'password': 'WrongPassword123!'
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('password', response.data)
+
+    def test_backup_codes_requires_2fa_enabled(self):
+        """Test that backup codes require 2FA enabled."""
+        self.user.is_2fa_enabled = False
+        self.user.save()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+
+        response = self.client.get(self.url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_backup_codes_requires_authentication(self):
+        """Test that backup codes require authentication."""
+        response = self.client.get(self.url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+
+class TwoFactorLoginTestCase(APITestCase):
+    """Test cases for 2FA login endpoint."""
+
+    def setUp(self):
+        """Set up test data."""
+        self.url = reverse('users:login-2fa')
+        self.login_url = reverse('users:login')
+        self.password = 'SecurePass123!'
+        self.user = User.objects.create_user(
+            email='testuser@example.com',
+            password=self.password,
+            first_name='Test',
+            last_name='User',
+            user_type='patient',
+            is_active=True,
+            is_2fa_enabled=True
+        )
+        # Create verified 2FA
+        self.two_factor = TwoFactorAuth.create_for_user(self.user)
+        self.two_factor.is_verified = True
+        self.two_factor.save()
+        # Generate backup codes
+        self.backup_codes = BackupCode.generate_codes_for_user(self.user)
+
+    def test_login_with_2fa_requires_totp(self):
+        """Test that login with 2FA enabled requires TOTP verification."""
+        response = self.client.post(self.login_url, {
+            'email': self.user.email,
+            'password': self.password
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertTrue(response.data['requires_2fa'])
+        self.assertIn('temp_token', response.data)
+        self.assertNotIn('email', response.data)
+
+    def test_2fa_login_success_with_totp(self):
+        """Test successful 2FA login with TOTP code."""
+        # First get temp token
+        temp_token = TwoFactorToken.create_for_user(self.user)
+        totp = pyotp.TOTP(self.two_factor.secret)
+
+        response = self.client.post(self.url, {
+            'temp_token': temp_token.token,
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', response.data)
+        self.assertIn('refresh', response.data)
+        self.assertIn('user', response.data)
+
+    def test_2fa_login_success_with_backup_code(self):
+        """Test successful 2FA login with backup code."""
+        temp_token = TwoFactorToken.create_for_user(self.user)
+        backup_code = self.backup_codes[0]
+
+        response = self.client.post(self.url, {
+            'temp_token': temp_token.token,
+            'code': backup_code
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', response.data)
+
+    def test_2fa_login_backup_code_marked_used(self):
+        """Test that backup code is marked as used after login."""
+        temp_token = TwoFactorToken.create_for_user(self.user)
+        backup_code = self.backup_codes[0]
+        initial_count = BackupCode.get_unused_count(self.user)
+
+        response = self.client.post(self.url, {
+            'temp_token': temp_token.token,
+            'code': backup_code
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(BackupCode.get_unused_count(self.user), initial_count - 1)
+
+    def test_2fa_login_invalid_totp(self):
+        """Test 2FA login with invalid TOTP code."""
+        temp_token = TwoFactorToken.create_for_user(self.user)
+
+        response = self.client.post(self.url, {
+            'temp_token': temp_token.token,
+            'code': '000000'
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('code', response.data)
+
+    def test_2fa_login_invalid_backup_code(self):
+        """Test 2FA login with invalid backup code."""
+        temp_token = TwoFactorToken.create_for_user(self.user)
+
+        response = self.client.post(self.url, {
+            'temp_token': temp_token.token,
+            'code': 'XXXXXXXX'
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('code', response.data)
+
+    def test_2fa_login_invalid_temp_token(self):
+        """Test 2FA login with invalid temp token."""
+        totp = pyotp.TOTP(self.two_factor.secret)
+
+        response = self.client.post(self.url, {
+            'temp_token': 'invalid-token',
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('temp_token', response.data)
+
+    def test_2fa_login_expired_temp_token(self):
+        """Test 2FA login with expired temp token."""
+        from django.utils import timezone
+        from datetime import timedelta
+
+        temp_token = TwoFactorToken.create_for_user(self.user)
+        # Manually expire the token
+        temp_token.expires_at = timezone.now() - timedelta(minutes=1)
+        temp_token.save()
+
+        totp = pyotp.TOTP(self.two_factor.secret)
+
+        response = self.client.post(self.url, {
+            'temp_token': temp_token.token,
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('temp_token', response.data)
+
+    def test_2fa_login_used_temp_token(self):
+        """Test 2FA login with already used temp token."""
+        temp_token = TwoFactorToken.create_for_user(self.user)
+        temp_token.is_used = True
+        temp_token.save()
+
+        totp = pyotp.TOTP(self.two_factor.secret)
+
+        response = self.client.post(self.url, {
+            'temp_token': temp_token.token,
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('temp_token', response.data)
+
+    def test_2fa_login_invalidates_temp_token(self):
+        """Test that successful 2FA login invalidates the temp token."""
+        temp_token = TwoFactorToken.create_for_user(self.user)
+        totp = pyotp.TOTP(self.two_factor.secret)
+
+        response = self.client.post(self.url, {
+            'temp_token': temp_token.token,
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # Try to use the same token again
+        response = self.client.post(self.url, {
+            'temp_token': temp_token.token,
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('temp_token', response.data)
+
+    def test_2fa_login_updates_last_login(self):
+        """Test that 2FA login updates last_login."""
+        self.assertIsNone(self.user.last_login)
+        temp_token = TwoFactorToken.create_for_user(self.user)
+        totp = pyotp.TOTP(self.two_factor.secret)
+
+        response = self.client.post(self.url, {
+            'temp_token': temp_token.token,
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.last_login)
+
+
+class TwoFactorFullFlowTestCase(APITestCase):
+    """Test cases for complete 2FA flow."""
+
+    def setUp(self):
+        """Set up test data."""
+        self.password = 'SecurePass123!'
+        self.user = User.objects.create_user(
+            email='testuser@example.com',
+            password=self.password,
+            first_name='Test',
+            last_name='User',
+            user_type='patient',
+            is_active=True
+        )
+        self.refresh_token = RefreshToken.for_user(self.user)
+        self.access_token = self.refresh_token.access_token
+
+    def test_complete_2fa_setup_and_login_flow(self):
+        """Test complete flow: setup -> verify -> login with 2FA."""
+        # Step 1: Setup 2FA
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+        setup_url = reverse('users:2fa-setup')
+        setup_response = self.client.post(setup_url, format='json')
+
+        self.assertEqual(setup_response.status_code, status.HTTP_200_OK)
+        secret = setup_response.data['secret']
+
+        # Step 2: Verify setup
+        verify_url = reverse('users:2fa-verify-setup')
+        totp = pyotp.TOTP(secret)
+        verify_response = self.client.post(verify_url, {
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(verify_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(verify_response.data['backup_codes']), 10)
+
+        # Step 3: Login requires 2FA - returns temp_token
+        self.client.credentials()
+        login_url = reverse('users:login')
+        login_response = self.client.post(login_url, {
+            'email': self.user.email,
+            'password': self.password
+        }, format='json')
+
+        self.assertEqual(login_response.status_code, status.HTTP_202_ACCEPTED)
+        self.assertTrue(login_response.data['requires_2fa'])
+        self.assertIn('temp_token', login_response.data)
+        temp_token = login_response.data['temp_token']
+
+        # Step 4: Complete login with temp_token and TOTP
+        login_2fa_url = reverse('users:login-2fa')
+        login_2fa_response = self.client.post(login_2fa_url, {
+            'temp_token': temp_token,
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(login_2fa_response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', login_2fa_response.data)
+
+    def test_disable_2fa_and_normal_login(self):
+        """Test disabling 2FA allows normal login."""
+        # Setup and enable 2FA
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {self.access_token}')
+        setup_url = reverse('users:2fa-setup')
+        setup_response = self.client.post(setup_url, format='json')
+        secret = setup_response.data['secret']
+
+        verify_url = reverse('users:2fa-verify-setup')
+        totp = pyotp.TOTP(secret)
+        self.client.post(verify_url, {
+            'code': totp.now()
+        }, format='json')
+
+        # Disable 2FA
+        disable_url = reverse('users:2fa-disable')
+        disable_response = self.client.post(disable_url, {
+            'password': self.password,
+            'code': totp.now()
+        }, format='json')
+
+        self.assertEqual(disable_response.status_code, status.HTTP_200_OK)
+
+        # Normal login should work now
+        self.client.credentials()
+        login_url = reverse('users:login')
+        login_response = self.client.post(login_url, {
+            'email': self.user.email,
+            'password': self.password
+        }, format='json')
+
+        self.assertEqual(login_response.status_code, status.HTTP_200_OK)
+        self.assertIn('access', login_response.data)
+        self.assertNotIn('requires_2fa', login_response.data)

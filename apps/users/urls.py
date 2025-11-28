@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    BackupCodesView,
     ChangePasswordView,
     DoctorRegistrationView,
     LoginView,
@@ -8,6 +9,11 @@ from .views import (
     PatientRegistrationView,
     RequestOTPView,
     TokenRefreshView,
+    TwoFactorDisableView,
+    TwoFactorLoginView,
+    TwoFactorSetupView,
+    TwoFactorStatusView,
+    TwoFactorVerifySetupView,
     VerifyOTPView,
 )
 
@@ -24,7 +30,15 @@ urlpatterns = [
 
     # Authentication endpoints
     path('login/', LoginView.as_view(), name='login'),
+    path('login/2fa/', TwoFactorLoginView.as_view(), name='login-2fa'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     path('logout/', LogoutView.as_view(), name='logout'),
     path('password/change/', ChangePasswordView.as_view(), name='change-password'),
+
+    # Two-Factor Authentication endpoints
+    path('2fa/setup/', TwoFactorSetupView.as_view(), name='2fa-setup'),
+    path('2fa/verify-setup/', TwoFactorVerifySetupView.as_view(), name='2fa-verify-setup'),
+    path('2fa/disable/', TwoFactorDisableView.as_view(), name='2fa-disable'),
+    path('2fa/status/', TwoFactorStatusView.as_view(), name='2fa-status'),
+    path('2fa/backup-codes/', BackupCodesView.as_view(), name='2fa-backup-codes'),
 ]

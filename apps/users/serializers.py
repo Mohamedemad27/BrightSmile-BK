@@ -7,7 +7,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from utils.validators import phone_number_validator, validate_date_of_birth
-from .models import Doctor, EmailVerificationOTP, Patient
+from .models import BackupCode, Doctor, EmailVerificationOTP, Patient, TwoFactorAuth, TwoFactorToken
 
 User = get_user_model()
 
@@ -28,6 +28,7 @@ class UserResponseSerializer(serializers.ModelSerializer):
             'user_type',
             'is_active',
             'is_verified',
+            'is_2fa_enabled',
             'created_at',
         ]
         read_only_fields = fields
@@ -359,6 +360,15 @@ class OTPResponseSerializer(serializers.Serializer):
     email = serializers.EmailField(help_text="Email address")
 
 
+class VerifyOTPResponseSerializer(serializers.Serializer):
+    """Serializer for successful OTP verification response with auto-login tokens."""
+
+    message = serializers.CharField(help_text="Success message")
+    access = serializers.CharField(help_text="JWT access token for auto-login")
+    refresh = serializers.CharField(help_text="JWT refresh token")
+    user = UserResponseSerializer(help_text="Verified user data")
+
+
 class LoginSerializer(serializers.Serializer):
     """Serializer for user login."""
 
@@ -491,3 +501,253 @@ class ChangePasswordResponseSerializer(serializers.Serializer):
     """Serializer for change password response."""
 
     message = serializers.CharField(help_text="Success message")
+
+
+# ============================================================================
+# Two-Factor Authentication Serializers
+# ============================================================================
+
+class TwoFactorSetupSerializer(serializers.Serializer):
+    """Serializer for 2FA setup response."""
+
+    secret = serializers.CharField(help_text="TOTP secret key for manual entry")
+    qr_code = serializers.CharField(help_text="Base64 encoded QR code image")
+    provisioning_uri = serializers.CharField(help_text="otpauth:// URI for authenticator apps")
+
+
+class TwoFactorVerifySetupSerializer(serializers.Serializer):
+    """Serializer for verifying 2FA setup."""
+
+    code = serializers.CharField(
+        min_length=6,
+        max_length=6,
+        help_text="6-digit code from authenticator app"
+    )
+
+    def validate_code(self, value):
+        """Validate code is numeric."""
+        if not value.isdigit():
+            raise serializers.ValidationError("Code must contain only digits.")
+        return value
+
+    def validate(self, attrs):
+        """Validate TOTP code against stored secret."""
+        user = self.context.get('request').user
+        code = attrs['code']
+
+        # Check if user has 2FA setup pending
+        try:
+            two_factor_auth = user.two_factor_auth
+        except TwoFactorAuth.DoesNotExist:
+            raise serializers.ValidationError({
+                'detail': "2FA setup not initiated. Please start setup first."
+            })
+
+        if two_factor_auth.is_verified:
+            raise serializers.ValidationError({
+                'detail': "2FA is already enabled for this account."
+            })
+
+        # Verify the code
+        if not two_factor_auth.verify_code(code):
+            raise serializers.ValidationError({
+                'code': "Invalid code. Please try again."
+            })
+
+        attrs['two_factor_auth'] = two_factor_auth
+        return attrs
+
+
+class TwoFactorVerifySetupResponseSerializer(serializers.Serializer):
+    """Serializer for 2FA verify setup response."""
+
+    message = serializers.CharField(help_text="Success message")
+    backup_codes = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="List of backup codes (save these securely!)"
+    )
+
+
+class TwoFactorDisableSerializer(serializers.Serializer):
+    """Serializer for disabling 2FA."""
+
+    password = serializers.CharField(
+        write_only=True,
+        style={'input_type': 'password'},
+        help_text="Current account password"
+    )
+    code = serializers.CharField(
+        min_length=6,
+        max_length=6,
+        help_text="6-digit code from authenticator app"
+    )
+
+    def validate_password(self, value):
+        """Validate current password."""
+        user = self.context.get('request').user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Incorrect password.")
+        return value
+
+    def validate_code(self, value):
+        """Validate code is numeric."""
+        if not value.isdigit():
+            raise serializers.ValidationError("Code must contain only digits.")
+        return value
+
+    def validate(self, attrs):
+        """Validate user has 2FA enabled and code is valid."""
+        user = self.context.get('request').user
+        code = attrs['code']
+
+        # Check if 2FA is enabled
+        if not user.is_2fa_enabled:
+            raise serializers.ValidationError({
+                'detail': "2FA is not enabled for this account."
+            })
+
+        try:
+            two_factor_auth = user.two_factor_auth
+        except TwoFactorAuth.DoesNotExist:
+            raise serializers.ValidationError({
+                'detail': "2FA configuration not found."
+            })
+
+        # Verify the code
+        if not two_factor_auth.verify_code(code):
+            raise serializers.ValidationError({
+                'code': "Invalid code. Please try again."
+            })
+
+        attrs['two_factor_auth'] = two_factor_auth
+        return attrs
+
+
+class TwoFactorDisableResponseSerializer(serializers.Serializer):
+    """Serializer for 2FA disable response."""
+
+    message = serializers.CharField(help_text="Success message")
+
+
+class BackupCodesResponseSerializer(serializers.Serializer):
+    """Serializer for backup codes response."""
+
+    backup_codes = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="List of unused backup codes"
+    )
+    unused_count = serializers.IntegerField(help_text="Number of unused backup codes")
+
+
+class RegenerateBackupCodesSerializer(serializers.Serializer):
+    """Serializer for regenerating backup codes."""
+
+    password = serializers.CharField(
+        write_only=True,
+        style={'input_type': 'password'},
+        help_text="Current account password"
+    )
+
+    def validate_password(self, value):
+        """Validate current password."""
+        user = self.context.get('request').user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Incorrect password.")
+        return value
+
+    def validate(self, attrs):
+        """Validate user has 2FA enabled."""
+        user = self.context.get('request').user
+
+        if not user.is_2fa_enabled:
+            raise serializers.ValidationError({
+                'detail': "2FA must be enabled to regenerate backup codes."
+            })
+
+        return attrs
+
+
+class TwoFactorLoginSerializer(serializers.Serializer):
+    """Serializer for 2FA login verification."""
+
+    temp_token = serializers.CharField(
+        help_text="Temporary token from login response"
+    )
+    code = serializers.CharField(
+        min_length=6,
+        max_length=8,  # Allow 8 chars for backup codes
+        help_text="6-digit TOTP code or 8-character backup code"
+    )
+
+    def validate(self, attrs):
+        """Validate temp token and 2FA code."""
+        temp_token = attrs.get('temp_token', '').strip()
+        code = attrs.get('code', '').strip()
+
+        # Verify temp token and get user
+        user = TwoFactorToken.verify_token(temp_token)
+        if not user:
+            raise serializers.ValidationError({
+                'temp_token': "Invalid or expired token. Please login again."
+            })
+
+        # Verify user has 2FA enabled
+        if not user.is_2fa_enabled:
+            raise serializers.ValidationError({
+                'detail': "2FA is not enabled for this account."
+            })
+
+        # Check if user is active
+        if not user.is_active:
+            raise serializers.ValidationError({
+                'detail': "Your account is not active."
+            })
+
+        # Try TOTP code first (6 digits)
+        verified = False
+        if len(code) == 6 and code.isdigit():
+            try:
+                two_factor_auth = user.two_factor_auth
+                if two_factor_auth.verify_code(code):
+                    verified = True
+            except TwoFactorAuth.DoesNotExist:
+                pass
+
+        # Try backup code (8 characters)
+        if not verified and len(code) == 8:
+            if BackupCode.verify_code_for_user(user, code):
+                verified = True
+
+        if not verified:
+            raise serializers.ValidationError({
+                'code': "Invalid code. Please try again."
+            })
+
+        # Store temp_token for invalidation in view
+        attrs['temp_token_str'] = temp_token
+        attrs['user'] = user
+        return attrs
+
+
+class TwoFactorLoginResponseSerializer(serializers.Serializer):
+    """Serializer for 2FA login response."""
+
+    access = serializers.CharField(help_text="JWT access token")
+    refresh = serializers.CharField(help_text="JWT refresh token")
+    user = UserResponseSerializer(help_text="User data")
+
+
+class TwoFactorRequiredResponseSerializer(serializers.Serializer):
+    """Serializer for login response when 2FA is required."""
+
+    requires_2fa = serializers.BooleanField(help_text="Indicates 2FA verification is required")
+    temp_token = serializers.CharField(help_text="Temporary token for 2FA verification (expires in 5 minutes)")
+    message = serializers.CharField(help_text="Message indicating 2FA is required")
+
+
+class TwoFactorStatusSerializer(serializers.Serializer):
+    """Serializer for 2FA status response."""
+
+    is_enabled = serializers.BooleanField(help_text="Whether 2FA is currently enabled")
+    is_setup_pending = serializers.BooleanField(help_text="Whether 2FA setup is pending verification")
+    backup_codes_remaining = serializers.IntegerField(help_text="Number of unused backup codes")
