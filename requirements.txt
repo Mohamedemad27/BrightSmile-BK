@@ -7,6 +7,7 @@ django-cors-headers==4.9.0
 django-debug-toolbar==6.1.0
 django-silk==0.5.2
 djangorestframework==3.16.1
+djangorestframework-simplejwt==5.5.0
 drf-yasg==1.21.11
 idna==3.11
 inflection==0.5.1

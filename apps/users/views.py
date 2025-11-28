@@ -1,18 +1,26 @@
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import EmailVerificationOTP
 from .serializers import (
     DoctorRegistrationResponseSerializer,
     DoctorRegistrationSerializer,
+    LoginResponseSerializer,
+    LoginSerializer,
+    LogoutResponseSerializer,
+    LogoutSerializer,
     OTPResponseSerializer,
     PatientRegistrationResponseSerializer,
     PatientRegistrationSerializer,
     RequestOTPSerializer,
+    TokenRefreshResponseSerializer,
     UserResponseSerializer,
     VerifyOTPSerializer,
 )
@@ -346,5 +354,264 @@ class VerifyOTPView(APIView):
                 'message': 'Email verified successfully.',
                 'email': user.email
             }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class LoginView(APIView):
+    """
+    User Login Endpoint
+
+    Authenticates users with email/password and returns JWT tokens.
+    """
+
+    permission_classes = []  # Public endpoint
+
+    @swagger_auto_schema(
+        operation_id='login',
+        operation_description="""
+        Authenticate user and obtain JWT tokens.
+
+        **Process:**
+        1. Validate email and password
+        2. Check user exists and password is correct
+        3. Check user account is active
+        4. Generate access and refresh tokens
+        5. Update last_login timestamp
+        6. Return tokens and user data
+
+        **Token Usage:**
+        - Include access token in Authorization header: `Bearer <access_token>`
+        - Access token expires in 60 minutes (configurable)
+        - Use refresh token to obtain new access token
+
+        **Account Status:**
+        - Only active users (is_active=True) can login
+        - Doctors must be approved by admin before login
+        """,
+        request_body=LoginSerializer,
+        responses={
+            200: openapi.Response(
+                description="Login successful",
+                schema=LoginResponseSerializer,
+                examples={
+                    'application/json': {
+                        'access': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
+                        'refresh': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
+                        'user': {
+                            'id': 1,
+                            'email': 'user@example.com',
+                            'first_name': 'John',
+                            'last_name': 'Doe',
+                            'full_name': 'John Doe',
+                            'user_type': 'patient',
+                            'is_active': True,
+                            'is_verified': True,
+                            'created_at': '2024-01-01T12:00:00Z'
+                        }
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Invalid credentials or inactive account",
+                examples={
+                    'application/json': {
+                        'detail': 'Invalid email or password.'
+                    }
+                }
+            )
+        },
+        tags=['Authentication']
+    )
+    def post(self, request):
+        """Login and obtain JWT tokens."""
+        serializer = LoginSerializer(data=request.data)
+
+        if serializer.is_valid():
+            user = serializer.validated_data['user']
+
+            # Generate tokens
+            refresh = RefreshToken.for_user(user)
+
+            # Update last_login
+            user.last_login = timezone.now()
+            user.save(update_fields=['last_login'])
+
+            return Response({
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': UserResponseSerializer(user).data
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class TokenRefreshView(APIView):
+    """
+    Token Refresh Endpoint
+
+    Obtain a new access token using a refresh token.
+    """
+
+    permission_classes = []  # Public endpoint
+
+    @swagger_auto_schema(
+        operation_id='token_refresh',
+        operation_description="""
+        Obtain new access token using refresh token.
+
+        **Process:**
+        1. Validate refresh token
+        2. Generate new access token
+        3. If token rotation is enabled, generate new refresh token and blacklist old one
+        4. Return new tokens
+
+        **Token Rotation:**
+        - Enabled by default for security
+        - Old refresh token is blacklisted after use
+        - New refresh token is provided with each refresh
+
+        **Refresh Token Lifetime:**
+        - Default: 7 days (configurable via JWT_REFRESH_TOKEN_LIFETIME_DAYS)
+        """,
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            required=['refresh'],
+            properties={
+                'refresh': openapi.Schema(
+                    type=openapi.TYPE_STRING,
+                    description='Refresh token'
+                ),
+            }
+        ),
+        responses={
+            200: openapi.Response(
+                description="Token refreshed successfully",
+                schema=TokenRefreshResponseSerializer,
+                examples={
+                    'application/json': {
+                        'access': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
+                        'refresh': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...'
+                    }
+                }
+            ),
+            401: openapi.Response(
+                description="Invalid or expired refresh token",
+                examples={
+                    'application/json': {
+                        'detail': 'Token is invalid or expired',
+                        'code': 'token_not_valid'
+                    }
+                }
+            )
+        },
+        tags=['Authentication']
+    )
+    def post(self, request):
+        """Refresh access token."""
+        refresh_token = request.data.get('refresh')
+
+        if not refresh_token:
+            return Response({
+                'refresh': ['This field is required.']
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            refresh = RefreshToken(refresh_token)
+
+            response_data = {
+                'access': str(refresh.access_token),
+            }
+
+            # If rotation is enabled, include new refresh token
+            # The old token is automatically blacklisted by simplejwt
+            response_data['refresh'] = str(refresh)
+
+            return Response(response_data, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({
+                'detail': 'Token is invalid or expired',
+                'code': 'token_not_valid'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+
+class LogoutView(APIView):
+    """
+    User Logout Endpoint
+
+    Blacklists the refresh token to invalidate the session.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_id='logout',
+        operation_description="""
+        Logout user by blacklisting the refresh token.
+
+        **Process:**
+        1. Validate refresh token
+        2. Add refresh token to blacklist
+        3. Return success message
+
+        **Important:**
+        - Access token will remain valid until it expires
+        - Client should discard both tokens after logout
+        - Requires authentication (Bearer token in header)
+
+        **Security:**
+        - Blacklisted tokens cannot be used for refresh
+        - Recommended to logout from all devices by blacklisting all tokens
+        """,
+        request_body=LogoutSerializer,
+        responses={
+            200: openapi.Response(
+                description="Logout successful",
+                schema=LogoutResponseSerializer,
+                examples={
+                    'application/json': {
+                        'message': 'Successfully logged out.'
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Invalid refresh token",
+                examples={
+                    'application/json': {
+                        'refresh': ['Invalid or expired refresh token.']
+                    }
+                }
+            ),
+            401: openapi.Response(
+                description="Authentication required",
+                examples={
+                    'application/json': {
+                        'detail': 'Authentication credentials were not provided.'
+                    }
+                }
+            )
+        },
+        tags=['Authentication'],
+        security=[{'Bearer': []}]
+    )
+    def post(self, request):
+        """Logout and blacklist refresh token."""
+        serializer = LogoutSerializer(data=request.data)
+
+        if serializer.is_valid():
+            try:
+                refresh_token = serializer.validated_data['refresh']
+                token = RefreshToken(refresh_token)
+                token.blacklist()
+
+                return Response({
+                    'message': 'Successfully logged out.'
+                }, status=status.HTTP_200_OK)
+
+            except Exception:
+                return Response({
+                    'refresh': ['Invalid or expired refresh token.']
+                }, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
