@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from utils.validators import phone_number_validator, validate_date_of_birth
 from .models import Doctor, EmailVerificationOTP, Patient
@@ -356,3 +357,81 @@ class OTPResponseSerializer(serializers.Serializer):
 
     message = serializers.CharField(help_text="Response message")
     email = serializers.EmailField(help_text="Email address")
+
+
+class LoginSerializer(serializers.Serializer):
+    """Serializer for user login."""
+
+    email = serializers.EmailField(
+        help_text="User's email address"
+    )
+    password = serializers.CharField(
+        write_only=True,
+        style={'input_type': 'password'},
+        help_text="User's password"
+    )
+
+    def validate(self, attrs):
+        """Validate credentials and check user status."""
+        email = attrs.get('email', '').lower()
+        password = attrs.get('password', '')
+
+        # Check if user exists
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            raise serializers.ValidationError({
+                'detail': "Invalid email or password."
+            })
+
+        # Check password
+        if not user.check_password(password):
+            raise serializers.ValidationError({
+                'detail': "Invalid email or password."
+            })
+
+        # Check if user is active
+        if not user.is_active:
+            raise serializers.ValidationError({
+                'detail': "Your account is not active. Please contact support."
+            })
+
+        attrs['user'] = user
+        return attrs
+
+
+class LoginResponseSerializer(serializers.Serializer):
+    """Serializer for login response."""
+
+    access = serializers.CharField(help_text="JWT access token")
+    refresh = serializers.CharField(help_text="JWT refresh token")
+    user = UserResponseSerializer(help_text="User data")
+
+
+class TokenRefreshResponseSerializer(serializers.Serializer):
+    """Serializer for token refresh response."""
+
+    access = serializers.CharField(help_text="New JWT access token")
+    refresh = serializers.CharField(help_text="New JWT refresh token (if rotation enabled)")
+
+
+class LogoutSerializer(serializers.Serializer):
+    """Serializer for logout request."""
+
+    refresh = serializers.CharField(
+        help_text="Refresh token to blacklist"
+    )
+
+    def validate_refresh(self, value):
+        """Validate refresh token."""
+        try:
+            RefreshToken(value)
+        except Exception:
+            raise serializers.ValidationError("Invalid or expired refresh token.")
+        return value
+
+
+class LogoutResponseSerializer(serializers.Serializer):
+    """Serializer for logout response."""
+
+    message = serializers.CharField(help_text="Success message")
