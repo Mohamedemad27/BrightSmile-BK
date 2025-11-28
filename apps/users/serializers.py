@@ -435,3 +435,59 @@ class LogoutResponseSerializer(serializers.Serializer):
     """Serializer for logout response."""
 
     message = serializers.CharField(help_text="Success message")
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """Serializer for changing user password."""
+
+    current_password = serializers.CharField(
+        write_only=True,
+        style={'input_type': 'password'},
+        help_text="Current password"
+    )
+    new_password = serializers.CharField(
+        write_only=True,
+        style={'input_type': 'password'},
+        help_text="New password (min 8 characters)"
+    )
+    new_password_confirm = serializers.CharField(
+        write_only=True,
+        style={'input_type': 'password'},
+        help_text="Confirm new password"
+    )
+
+    def validate_current_password(self, value):
+        """Validate current password is correct."""
+        user = self.context.get('request').user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Current password is incorrect.")
+        return value
+
+    def validate_new_password(self, value):
+        """Validate new password using Django's password validators."""
+        try:
+            validate_password(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(list(e.messages))
+        return value
+
+    def validate(self, attrs):
+        """Validate new passwords match."""
+        if attrs['new_password'] != attrs['new_password_confirm']:
+            raise serializers.ValidationError({
+                'new_password_confirm': "New passwords do not match."
+            })
+
+        # Check new password is different from current
+        if attrs['current_password'] == attrs['new_password']:
+            raise serializers.ValidationError({
+                'new_password': "New password must be different from current password."
+            })
+
+        return attrs
+
+
+class ChangePasswordResponseSerializer(serializers.Serializer):
+    """Serializer for change password response."""
+
+    message = serializers.CharField(help_text="Success message")

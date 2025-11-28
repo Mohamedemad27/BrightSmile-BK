@@ -10,6 +10,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import EmailVerificationOTP
 from .serializers import (
+    ChangePasswordResponseSerializer,
+    ChangePasswordSerializer,
     DoctorRegistrationResponseSerializer,
     DoctorRegistrationSerializer,
     LoginResponseSerializer,
@@ -613,5 +615,90 @@ class LogoutView(APIView):
                 return Response({
                     'refresh': ['Invalid or expired refresh token.']
                 }, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ChangePasswordView(APIView):
+    """
+    Change Password Endpoint
+
+    Allows authenticated users to change their password.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_id='change_password',
+        operation_description="""
+        Change the authenticated user's password.
+
+        **Process:**
+        1. Verify current password is correct
+        2. Validate new password meets security requirements
+        3. Validate new password confirmation matches
+        4. Update user's password
+        5. Return success message
+
+        **Password Requirements:**
+        - Minimum 8 characters
+        - Cannot be too similar to personal information
+        - Cannot be a commonly used password
+        - Cannot be entirely numeric
+        - Must be different from current password
+
+        **Note:**
+        - Requires authentication (Bearer token in header)
+        - After changing password, existing tokens remain valid
+        - User should logout and login again for best security
+        """,
+        request_body=ChangePasswordSerializer,
+        responses={
+            200: openapi.Response(
+                description="Password changed successfully",
+                schema=ChangePasswordResponseSerializer,
+                examples={
+                    'application/json': {
+                        'message': 'Password changed successfully.'
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Validation error",
+                examples={
+                    'application/json': {
+                        'current_password': ['Current password is incorrect.'],
+                        'new_password': ['This password is too short.'],
+                        'new_password_confirm': ['New passwords do not match.']
+                    }
+                }
+            ),
+            401: openapi.Response(
+                description="Authentication required",
+                examples={
+                    'application/json': {
+                        'detail': 'Authentication credentials were not provided.'
+                    }
+                }
+            )
+        },
+        tags=['Authentication'],
+        security=[{'Bearer': []}]
+    )
+    def post(self, request):
+        """Change user password."""
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+
+        if serializer.is_valid():
+            user = request.user
+            user.set_password(serializer.validated_data['new_password'])
+            user.save(update_fields=['password'])
+
+            return Response({
+                'message': 'Password changed successfully.'
+            }, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
