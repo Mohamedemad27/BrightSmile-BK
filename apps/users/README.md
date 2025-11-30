@@ -16,9 +16,12 @@ This app implements a custom user model that extends Django's `AbstractBaseUser`
 | `first_name` | CharField | User's first name (max 150 chars) | No |
 | `last_name` | CharField | User's last name (max 150 chars) | No |
 | `user_type` | CharField | Type of user (patient/doctor/admin) | Yes |
+| `google_id` | CharField | Google OAuth user ID (unique, nullable) | Yes |
+| `auth_provider` | CharField | Authentication provider (email/google) | Yes |
 | `is_active` | BooleanField | Account active status (default: True) | Yes |
 | `is_staff` | BooleanField | Staff status for admin access (default: False) | No |
 | `is_verified` | BooleanField | Email verification status (default: False) | Yes |
+| `is_2fa_enabled` | BooleanField | Two-factor authentication status (default: False) | Yes |
 | `last_login` | DateTimeField | Last login timestamp (nullable) | No |
 | `created_at` | DateTimeField | Account creation timestamp | Yes |
 | `updated_at` | DateTimeField | Last update timestamp | No |
@@ -36,6 +39,8 @@ This app implements a custom user model that extends Django's `AbstractBaseUser`
 - `(user_type, is_active)` - For filtering users by type and status
 - `(is_verified, is_active)` - For filtering verified active users
 - `email` - Additional index for email lookups
+- `google_id` - For Google OAuth lookups
+- `auth_provider` - For filtering by authentication provider
 
 ### User Types
 
@@ -44,6 +49,15 @@ USER_TYPE_CHOICES = [
     ('patient', 'Patient'),
     ('doctor', 'Doctor'),
     ('admin', 'Admin'),
+]
+```
+
+### Auth Providers
+
+```python
+AUTH_PROVIDER_CHOICES = [
+    ('email', 'Email'),
+    ('google', 'Google'),
 ]
 ```
 

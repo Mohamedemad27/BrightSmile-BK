@@ -4,6 +4,9 @@ from .views import (
     BackupCodesView,
     ChangePasswordView,
     DoctorRegistrationView,
+    GoogleDoctorAuthView,
+    GoogleLinkAccountView,
+    GooglePatientAuthView,
     LoginView,
     LogoutView,
     PatientRegistrationView,
@@ -41,4 +44,9 @@ urlpatterns = [
     path('2fa/disable/', TwoFactorDisableView.as_view(), name='2fa-disable'),
     path('2fa/status/', TwoFactorStatusView.as_view(), name='2fa-status'),
     path('2fa/backup-codes/', BackupCodesView.as_view(), name='2fa-backup-codes'),
+
+    # Google OAuth endpoints
+    path('auth/google/patient/', GooglePatientAuthView.as_view(), name='google-patient-auth'),
+    path('auth/google/doctor/', GoogleDoctorAuthView.as_view(), name='google-doctor-auth'),
+    path('auth/google/link/', GoogleLinkAccountView.as_view(), name='google-link-account'),
 ]
