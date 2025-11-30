@@ -30,3 +30,4 @@ urllib3==2.5.0
 pyotp==2.9.0
 qrcode[pil]==8.0
 cryptography==44.0.0
+google-auth==2.38.0

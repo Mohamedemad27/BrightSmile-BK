@@ -196,3 +196,10 @@ SIMPLE_JWT = {
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
 }
+
+# Two-Factor Authentication Configuration
+TWO_FACTOR_ISSUER_NAME = config('TWO_FACTOR_ISSUER_NAME', default='Bright Smile')
+TWO_FACTOR_TOKEN_EXPIRY_MINUTES = config('TWO_FACTOR_TOKEN_EXPIRY_MINUTES', default=5, cast=int)
+
+# Google OAuth Configuration
+GOOGLE_CLIENT_ID = config('GOOGLE_CLIENT_ID', default='')

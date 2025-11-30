@@ -41,11 +41,33 @@ class User(AbstractBaseUser, PermissionsMixin):
         ('admin', 'Admin'),
     ]
 
+    AUTH_PROVIDER_CHOICES = [
+        ('email', 'Email'),
+        ('google', 'Google'),
+    ]
+
     # Authentication & Identification
     email = models.EmailField(unique=True, max_length=255)  # unique=True creates an index
     first_name = models.CharField(max_length=150)
     last_name = models.CharField(max_length=150)
     user_type = models.CharField(max_length=10, choices=USER_TYPE_CHOICES, db_index=True)
+
+    # OAuth fields
+    google_id = models.CharField(
+        max_length=255,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Google OAuth user ID"
+    )
+    auth_provider = models.CharField(
+        max_length=20,
+        choices=AUTH_PROVIDER_CHOICES,
+        default='email',
+        db_index=True,
+        help_text="Authentication provider used for registration"
+    )
 
     # Status & Permissions
     is_active = models.BooleanField(default=True, db_index=True)
@@ -76,6 +98,10 @@ class User(AbstractBaseUser, PermissionsMixin):
             models.Index(fields=['is_verified', 'is_active'], name='user_verified_active_idx'),
             # Index for email lookups with case-insensitive search support
             models.Index(fields=['email'], name='user_email_idx'),
+            # Index for Google OAuth lookups
+            models.Index(fields=['google_id'], name='user_google_id_idx'),
+            # Index for auth provider filtering
+            models.Index(fields=['auth_provider'], name='user_auth_provider_idx'),
         ]
 
     def __str__(self):

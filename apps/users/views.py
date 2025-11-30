@@ -15,6 +15,13 @@ from .serializers import (
     ChangePasswordSerializer,
     DoctorRegistrationResponseSerializer,
     DoctorRegistrationSerializer,
+    GoogleAuthRegistrationResponseSerializer,
+    GoogleAuthResponseSerializer,
+    GoogleDoctorAuthSerializer,
+    GoogleDoctorRegistrationResponseSerializer,
+    GoogleLinkAccountResponseSerializer,
+    GoogleLinkAccountSerializer,
+    GooglePatientAuthSerializer,
     LoginResponseSerializer,
     LoginSerializer,
     LogoutResponseSerializer,
@@ -1307,6 +1314,414 @@ class TwoFactorLoginView(APIView):
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
                 'user': UserResponseSerializer(user).data
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ============================================================================
+# Google OAuth Views
+# ============================================================================
+
+class GooglePatientAuthView(APIView):
+    """
+    Google OAuth Patient Authentication Endpoint
+
+    Handles both registration (new user) and login (existing user) for patients
+    using Google OAuth.
+    """
+
+    permission_classes = []  # Public endpoint
+
+    @swagger_auto_schema(
+        operation_id='google_patient_auth',
+        operation_description="""
+        Authenticate or register a patient using Google OAuth.
+
+        **Flow for New Users (Registration):**
+        1. Frontend obtains Google ID token via Google Sign-In
+        2. Call this endpoint with id_token, date_of_birth, and phone_number
+        3. User account is created with is_active=True, is_verified=True
+        4. Patient profile is created
+        5. JWT tokens are returned for immediate use
+
+        **Flow for Existing Users (Login):**
+        1. Frontend obtains Google ID token via Google Sign-In
+        2. Call this endpoint with just id_token
+        3. If 2FA is enabled, returns requires_2fa flag
+        4. If 2FA is not enabled, JWT tokens are returned
+
+        **Required Fields for New Users:**
+        - id_token: Google ID token from frontend
+        - date_of_birth: Date of birth (YYYY-MM-DD)
+        - phone_number: Phone in international format (+1234567890)
+
+        **Required Fields for Existing Users:**
+        - id_token: Google ID token from frontend
+
+        **Note:**
+        - Google verifies the email, so is_verified is set to True
+        - If email already exists with email/password auth, returns error
+        """,
+        request_body=GooglePatientAuthSerializer,
+        responses={
+            200: openapi.Response(
+                description="Login successful (existing user)",
+                schema=GoogleAuthResponseSerializer,
+                examples={
+                    'application/json': {
+                        'message': 'Login successful',
+                        'user': {
+                            'id': 1,
+                            'email': 'patient@gmail.com',
+                            'first_name': 'John',
+                            'last_name': 'Doe',
+                            'full_name': 'John Doe',
+                            'user_type': 'patient',
+                            'is_active': True,
+                            'is_verified': True,
+                            'is_2fa_enabled': False,
+                            'created_at': '2024-01-01T12:00:00Z'
+                        },
+                        'tokens': {
+                            'access': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
+                            'refresh': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...'
+                        }
+                    }
+                }
+            ),
+            201: openapi.Response(
+                description="Registration successful (new user)",
+                schema=GoogleAuthRegistrationResponseSerializer,
+                examples={
+                    'application/json': {
+                        'message': 'Patient registered successfully via Google',
+                        'user': {
+                            'id': 1,
+                            'email': 'patient@gmail.com',
+                            'first_name': 'John',
+                            'last_name': 'Doe',
+                            'full_name': 'John Doe',
+                            'user_type': 'patient',
+                            'is_active': True,
+                            'is_verified': True,
+                            'is_2fa_enabled': False,
+                            'created_at': '2024-01-01T12:00:00Z'
+                        },
+                        'tokens': {
+                            'access': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
+                            'refresh': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...'
+                        }
+                    }
+                }
+            ),
+            202: openapi.Response(
+                description="2FA verification required (existing user with 2FA)",
+                schema=TwoFactorRequiredResponseSerializer,
+                examples={
+                    'application/json': {
+                        'requires_2fa': True,
+                        'temp_token': 'a1b2c3d4e5f6...',
+                        'message': 'Two-factor authentication required. Please provide your TOTP code.'
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Validation error",
+                examples={
+                    'application/json': {
+                        'id_token': ['Invalid Google token'],
+                        'date_of_birth': ['This field is required for new users.'],
+                        'phone_number': ['This field is required for new users.']
+                    }
+                }
+            ),
+            409: openapi.Response(
+                description="Conflict - Email exists with different provider",
+                examples={
+                    'application/json': {
+                        'id_token': ['An account with this email already exists. Please login with your email and password.']
+                    }
+                }
+            )
+        },
+        tags=['Google OAuth']
+    )
+    def post(self, request):
+        """Authenticate or register patient with Google."""
+        serializer = GooglePatientAuthSerializer(data=request.data)
+
+        if serializer.is_valid():
+            is_new_user = serializer.validated_data['is_new_user']
+            user = serializer.save()
+
+            # Check if user is active
+            if not user.is_active:
+                return Response({
+                    'detail': 'Your account is not active. Please contact support.'
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Check if 2FA is enabled (only for existing users)
+            if not is_new_user and user.is_2fa_enabled:
+                temp_token = TwoFactorToken.create_for_user(user)
+                return Response({
+                    'requires_2fa': True,
+                    'temp_token': temp_token.token,
+                    'message': 'Two-factor authentication required. Please provide your TOTP code.'
+                }, status=status.HTTP_202_ACCEPTED)
+
+            # Generate tokens
+            refresh = RefreshToken.for_user(user)
+            user.last_login = timezone.now()
+            user.save(update_fields=['last_login'])
+
+            response_data = {
+                'message': 'Patient registered successfully via Google' if is_new_user else 'Login successful',
+                'user': UserResponseSerializer(user).data,
+                'tokens': {
+                    'access': str(refresh.access_token),
+                    'refresh': str(refresh)
+                }
+            }
+
+            status_code = status.HTTP_201_CREATED if is_new_user else status.HTTP_200_OK
+            return Response(response_data, status=status_code)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class GoogleDoctorAuthView(APIView):
+    """
+    Google OAuth Doctor Authentication Endpoint
+
+    Handles both registration (new user) and login (existing user) for doctors
+    using Google OAuth.
+    """
+
+    permission_classes = []  # Public endpoint
+
+    @swagger_auto_schema(
+        operation_id='google_doctor_auth',
+        operation_description="""
+        Authenticate or register a doctor using Google OAuth.
+
+        **Flow for New Users (Registration):**
+        1. Frontend obtains Google ID token via Google Sign-In
+        2. Call this endpoint with id_token and phone_number
+        3. User account is created with is_active=False (pending admin approval), is_verified=True
+        4. Doctor profile is created
+        5. No tokens returned (account needs approval)
+
+        **Flow for Existing Users (Login):**
+        1. Frontend obtains Google ID token via Google Sign-In
+        2. Call this endpoint with just id_token
+        3. If account is not active (pending approval), returns 403
+        4. If 2FA is enabled, returns requires_2fa flag
+        5. If 2FA is not enabled, JWT tokens are returned
+
+        **Required Fields for New Users:**
+        - id_token: Google ID token from frontend
+        - phone_number: Phone in international format (+1234567890)
+
+        **Required Fields for Existing Users:**
+        - id_token: Google ID token from frontend
+
+        **Note:**
+        - Doctor accounts require admin approval before login
+        - Google verifies the email, so is_verified is set to True
+        """,
+        request_body=GoogleDoctorAuthSerializer,
+        responses={
+            200: openapi.Response(
+                description="Login successful (existing approved doctor)",
+                schema=GoogleAuthResponseSerializer,
+                examples={
+                    'application/json': {
+                        'message': 'Login successful',
+                        'user': {
+                            'id': 2,
+                            'email': 'doctor@gmail.com',
+                            'first_name': 'Jane',
+                            'last_name': 'Smith',
+                            'full_name': 'Jane Smith',
+                            'user_type': 'doctor',
+                            'is_active': True,
+                            'is_verified': True,
+                            'is_2fa_enabled': False,
+                            'created_at': '2024-01-01T12:00:00Z'
+                        },
+                        'tokens': {
+                            'access': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...',
+                            'refresh': 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...'
+                        }
+                    }
+                }
+            ),
+            201: openapi.Response(
+                description="Registration successful (new doctor - pending approval)",
+                schema=GoogleDoctorRegistrationResponseSerializer,
+                examples={
+                    'application/json': {
+                        'message': 'Doctor registration submitted. Your account requires admin approval before you can login.',
+                        'user': {
+                            'id': 2,
+                            'email': 'doctor@gmail.com',
+                            'first_name': 'Jane',
+                            'last_name': 'Smith',
+                            'full_name': 'Jane Smith',
+                            'user_type': 'doctor',
+                            'is_active': False,
+                            'is_verified': True,
+                            'is_2fa_enabled': False,
+                            'created_at': '2024-01-01T12:00:00Z'
+                        }
+                    }
+                }
+            ),
+            202: openapi.Response(
+                description="2FA verification required (existing user with 2FA)",
+                schema=TwoFactorRequiredResponseSerializer
+            ),
+            400: openapi.Response(
+                description="Validation error",
+                examples={
+                    'application/json': {
+                        'id_token': ['Invalid Google token'],
+                        'phone_number': ['This field is required for new users.']
+                    }
+                }
+            ),
+            403: openapi.Response(
+                description="Account pending approval",
+                examples={
+                    'application/json': {
+                        'detail': 'Your account is pending admin approval.'
+                    }
+                }
+            )
+        },
+        tags=['Google OAuth']
+    )
+    def post(self, request):
+        """Authenticate or register doctor with Google."""
+        serializer = GoogleDoctorAuthSerializer(data=request.data)
+
+        if serializer.is_valid():
+            is_new_user = serializer.validated_data['is_new_user']
+            user = serializer.save()
+
+            # For new doctors, return without tokens (pending approval)
+            if is_new_user:
+                return Response({
+                    'message': 'Doctor registration submitted. Your account requires admin approval before you can login.',
+                    'user': UserResponseSerializer(user).data
+                }, status=status.HTTP_201_CREATED)
+
+            # For existing users, check if active
+            if not user.is_active:
+                return Response({
+                    'detail': 'Your account is pending admin approval.'
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Check if 2FA is enabled
+            if user.is_2fa_enabled:
+                temp_token = TwoFactorToken.create_for_user(user)
+                return Response({
+                    'requires_2fa': True,
+                    'temp_token': temp_token.token,
+                    'message': 'Two-factor authentication required. Please provide your TOTP code.'
+                }, status=status.HTTP_202_ACCEPTED)
+
+            # Generate tokens
+            refresh = RefreshToken.for_user(user)
+            user.last_login = timezone.now()
+            user.save(update_fields=['last_login'])
+
+            return Response({
+                'message': 'Login successful',
+                'user': UserResponseSerializer(user).data,
+                'tokens': {
+                    'access': str(refresh.access_token),
+                    'refresh': str(refresh)
+                }
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class GoogleLinkAccountView(APIView):
+    """
+    Google Account Link Endpoint
+
+    Allows authenticated users to link their Google account to their existing account.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_id='google_link_account',
+        operation_description="""
+        Link a Google account to an existing user account.
+
+        **Process:**
+        1. User must be authenticated with email/password
+        2. Frontend obtains Google ID token via Google Sign-In
+        3. Call this endpoint with the id_token
+        4. Google account is linked to the user
+
+        **Requirements:**
+        - User must be authenticated
+        - Google account email must match user's email
+        - Google account must not be linked to another user
+        - User must not already have a Google account linked
+
+        **After Linking:**
+        - User can login with either email/password or Google
+        - Original auth_provider remains 'email'
+        """,
+        request_body=GoogleLinkAccountSerializer,
+        responses={
+            200: openapi.Response(
+                description="Google account linked successfully",
+                schema=GoogleLinkAccountResponseSerializer,
+                examples={
+                    'application/json': {
+                        'message': 'Google account linked successfully'
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Validation error",
+                examples={
+                    'application/json': {
+                        'id_token': ['Invalid Google token'],
+                    }
+                }
+            ),
+            409: openapi.Response(
+                description="Conflict",
+                examples={
+                    'application/json': {
+                        'id_token': ['This Google account is already linked to another user.']
+                    }
+                }
+            )
+        },
+        tags=['Google OAuth'],
+        security=[{'Bearer': []}]
+    )
+    def post(self, request):
+        """Link Google account to existing user."""
+        serializer = GoogleLinkAccountSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+
+        if serializer.is_valid():
+            serializer.update(request.user, serializer.validated_data)
+
+            return Response({
+                'message': 'Google account linked successfully'
             }, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

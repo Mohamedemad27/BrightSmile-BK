@@ -751,3 +751,347 @@ class TwoFactorStatusSerializer(serializers.Serializer):
     is_enabled = serializers.BooleanField(help_text="Whether 2FA is currently enabled")
     is_setup_pending = serializers.BooleanField(help_text="Whether 2FA setup is pending verification")
     backup_codes_remaining = serializers.IntegerField(help_text="Number of unused backup codes")
+
+
+# ============================================================================
+# Google OAuth Serializers
+# ============================================================================
+
+class GooglePatientAuthSerializer(serializers.Serializer):
+    """
+    Serializer for Google OAuth patient authentication.
+
+    Handles both registration (new user) and login (existing user) flows.
+    For new users, date_of_birth and phone_number are required.
+    For existing users, only id_token is needed.
+    """
+
+    id_token = serializers.CharField(
+        help_text="Google ID token from frontend OAuth flow"
+    )
+    date_of_birth = serializers.DateField(
+        required=False,
+        help_text="Date of birth (YYYY-MM-DD format) - required for new users"
+    )
+    phone_number = serializers.CharField(
+        max_length=20,
+        required=False,
+        help_text="Phone number in international format (e.g., +1234567890) - required for new users"
+    )
+
+    def validate_date_of_birth(self, value):
+        """Validate date of birth if provided."""
+        if value:
+            try:
+                validate_date_of_birth(value)
+            except DjangoValidationError as e:
+                raise serializers.ValidationError(str(e.message))
+        return value
+
+    def validate_phone_number(self, value):
+        """Validate phone number format if provided."""
+        if value:
+            try:
+                phone_number_validator(value)
+            except DjangoValidationError as e:
+                raise serializers.ValidationError(str(e.message))
+        return value
+
+    def validate(self, attrs):
+        """Validate Google token and determine if registration or login."""
+        from .services import GoogleAuthService
+        from .services.google_auth import GoogleAuthError
+
+        id_token = attrs.get('id_token')
+
+        # Verify Google token
+        try:
+            google_data = GoogleAuthService.verify_token(id_token)
+        except GoogleAuthError as e:
+            raise serializers.ValidationError({'id_token': str(e)})
+
+        attrs['google_data'] = google_data
+
+        # Check if user exists by Google ID
+        existing_user_by_google_id = User.objects.filter(
+            google_id=google_data['google_id']
+        ).first()
+
+        # Check if user exists by email
+        existing_user_by_email = User.objects.filter(
+            email__iexact=google_data['email']
+        ).first()
+
+        if existing_user_by_google_id:
+            # Existing Google user - login flow
+            if existing_user_by_google_id.user_type != 'patient':
+                raise serializers.ValidationError({
+                    'id_token': f"This Google account is registered as a {existing_user_by_google_id.user_type}, not a patient."
+                })
+            attrs['existing_user'] = existing_user_by_google_id
+            attrs['is_new_user'] = False
+        elif existing_user_by_email:
+            # Email exists but not linked to Google
+            if existing_user_by_email.auth_provider != 'google':
+                raise serializers.ValidationError({
+                    'id_token': "An account with this email already exists. Please login with your email and password."
+                })
+            # Edge case: email registered with Google but google_id doesn't match (shouldn't happen)
+            raise serializers.ValidationError({
+                'id_token': "This Google account is already linked to another user."
+            })
+        else:
+            # New user - registration flow
+            attrs['is_new_user'] = True
+
+            # Validate required fields for new users
+            if not attrs.get('date_of_birth'):
+                raise serializers.ValidationError({
+                    'date_of_birth': "This field is required for new users."
+                })
+            if not attrs.get('phone_number'):
+                raise serializers.ValidationError({
+                    'phone_number': "This field is required for new users."
+                })
+
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        """Create new patient user or return existing user."""
+        google_data = validated_data['google_data']
+        is_new_user = validated_data['is_new_user']
+
+        if not is_new_user:
+            return validated_data['existing_user']
+
+        # Create new user
+        user = User.objects.create_user(
+            email=google_data['email'],
+            password=None,  # No password for Google users
+            first_name=google_data['first_name'] or 'User',
+            last_name=google_data['last_name'] or '',
+            user_type='patient',
+            is_active=True,
+            is_verified=True,  # Google verifies email
+            google_id=google_data['google_id'],
+            auth_provider='google',
+        )
+
+        # Create patient profile
+        Patient.objects.create(
+            user=user,
+            date_of_birth=validated_data['date_of_birth'],
+            phone_number=validated_data['phone_number'],
+        )
+
+        return user
+
+
+class GoogleDoctorAuthSerializer(serializers.Serializer):
+    """
+    Serializer for Google OAuth doctor authentication.
+
+    Handles both registration (new user) and login (existing user) flows.
+    For new users, phone_number is required.
+    For existing users, only id_token is needed.
+    """
+
+    id_token = serializers.CharField(
+        help_text="Google ID token from frontend OAuth flow"
+    )
+    phone_number = serializers.CharField(
+        max_length=20,
+        required=False,
+        help_text="Phone number in international format (e.g., +1234567890) - required for new users"
+    )
+
+    def validate_phone_number(self, value):
+        """Validate phone number format if provided."""
+        if value:
+            try:
+                phone_number_validator(value)
+            except DjangoValidationError as e:
+                raise serializers.ValidationError(str(e.message))
+        return value
+
+    def validate(self, attrs):
+        """Validate Google token and determine if registration or login."""
+        from .services import GoogleAuthService
+        from .services.google_auth import GoogleAuthError
+
+        id_token = attrs.get('id_token')
+
+        # Verify Google token
+        try:
+            google_data = GoogleAuthService.verify_token(id_token)
+        except GoogleAuthError as e:
+            raise serializers.ValidationError({'id_token': str(e)})
+
+        attrs['google_data'] = google_data
+
+        # Check if user exists by Google ID
+        existing_user_by_google_id = User.objects.filter(
+            google_id=google_data['google_id']
+        ).first()
+
+        # Check if user exists by email
+        existing_user_by_email = User.objects.filter(
+            email__iexact=google_data['email']
+        ).first()
+
+        if existing_user_by_google_id:
+            # Existing Google user - login flow
+            if existing_user_by_google_id.user_type != 'doctor':
+                raise serializers.ValidationError({
+                    'id_token': f"This Google account is registered as a {existing_user_by_google_id.user_type}, not a doctor."
+                })
+            attrs['existing_user'] = existing_user_by_google_id
+            attrs['is_new_user'] = False
+        elif existing_user_by_email:
+            # Email exists but not linked to Google
+            if existing_user_by_email.auth_provider != 'google':
+                raise serializers.ValidationError({
+                    'id_token': "An account with this email already exists. Please login with your email and password."
+                })
+            # Edge case: email registered with Google but google_id doesn't match
+            raise serializers.ValidationError({
+                'id_token': "This Google account is already linked to another user."
+            })
+        else:
+            # New user - registration flow
+            attrs['is_new_user'] = True
+
+            # Validate required fields for new users
+            if not attrs.get('phone_number'):
+                raise serializers.ValidationError({
+                    'phone_number': "This field is required for new users."
+                })
+
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        """Create new doctor user or return existing user."""
+        google_data = validated_data['google_data']
+        is_new_user = validated_data['is_new_user']
+
+        if not is_new_user:
+            return validated_data['existing_user']
+
+        # Create new user (inactive until admin approval)
+        user = User.objects.create_user(
+            email=google_data['email'],
+            password=None,  # No password for Google users
+            first_name=google_data['first_name'] or 'User',
+            last_name=google_data['last_name'] or '',
+            user_type='doctor',
+            is_active=False,  # Requires admin approval
+            is_verified=True,  # Google verifies email
+            google_id=google_data['google_id'],
+            auth_provider='google',
+        )
+
+        # Create doctor profile
+        Doctor.objects.create(
+            user=user,
+            phone_number=validated_data['phone_number'],
+        )
+
+        return user
+
+
+class GoogleLinkAccountSerializer(serializers.Serializer):
+    """
+    Serializer for linking a Google account to an existing user.
+
+    Allows users who registered with email/password to link their Google account.
+    """
+
+    id_token = serializers.CharField(
+        help_text="Google ID token from frontend OAuth flow"
+    )
+
+    def validate(self, attrs):
+        """Validate Google token and check if linkable."""
+        from .services import GoogleAuthService
+        from .services.google_auth import GoogleAuthError
+
+        id_token = attrs.get('id_token')
+        user = self.context.get('request').user
+
+        # Verify Google token
+        try:
+            google_data = GoogleAuthService.verify_token(id_token)
+        except GoogleAuthError as e:
+            raise serializers.ValidationError({'id_token': str(e)})
+
+        attrs['google_data'] = google_data
+
+        # Check if user already has Google linked
+        if user.google_id:
+            raise serializers.ValidationError({
+                'id_token': "Your account already has a Google account linked."
+            })
+
+        # Check if this Google account is already linked to another user
+        existing_google_user = User.objects.filter(
+            google_id=google_data['google_id']
+        ).first()
+
+        if existing_google_user:
+            raise serializers.ValidationError({
+                'id_token': "This Google account is already linked to another user."
+            })
+
+        # Check if email matches (optional security check)
+        if google_data['email'].lower() != user.email.lower():
+            raise serializers.ValidationError({
+                'id_token': "The Google account email does not match your account email."
+            })
+
+        return attrs
+
+    def update(self, instance, validated_data):
+        """Link Google account to user."""
+        google_data = validated_data['google_data']
+
+        instance.google_id = google_data['google_id']
+        instance.save(update_fields=['google_id'])
+
+        return instance
+
+
+class GoogleAuthResponseSerializer(serializers.Serializer):
+    """Serializer for Google auth login response."""
+
+    message = serializers.CharField(help_text="Success message")
+    user = UserResponseSerializer(help_text="User data")
+    tokens = serializers.DictField(
+        child=serializers.CharField(),
+        help_text="JWT tokens (access and refresh)"
+    )
+
+
+class GoogleAuthRegistrationResponseSerializer(serializers.Serializer):
+    """Serializer for Google auth registration response (patient)."""
+
+    message = serializers.CharField(help_text="Success message")
+    user = UserResponseSerializer(help_text="Created user data")
+    tokens = serializers.DictField(
+        child=serializers.CharField(),
+        help_text="JWT tokens (access and refresh)"
+    )
+
+
+class GoogleDoctorRegistrationResponseSerializer(serializers.Serializer):
+    """Serializer for Google auth registration response (doctor - no tokens, needs approval)."""
+
+    message = serializers.CharField(help_text="Success message with approval notice")
+    user = UserResponseSerializer(help_text="Created user data")
+
+
+class GoogleLinkAccountResponseSerializer(serializers.Serializer):
+    """Serializer for Google account link response."""
+
+    message = serializers.CharField(help_text="Success message")
