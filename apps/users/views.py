@@ -8,7 +8,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import BackupCode, EmailVerificationOTP, TwoFactorAuth, TwoFactorToken
+from .models import (
+    BackupCode,
+    EmailVerificationOTP,
+    PasswordResetOTP,
+    PasswordResetToken,
+    TwoFactorAuth,
+    TwoFactorToken,
+)
 from .serializers import (
     BackupCodesResponseSerializer,
     ChangePasswordResponseSerializer,
@@ -27,6 +34,12 @@ from .serializers import (
     LogoutResponseSerializer,
     LogoutSerializer,
     OTPResponseSerializer,
+    PasswordResetConfirmResponseSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestResponseSerializer,
+    PasswordResetRequestSerializer,
+    PasswordResetVerifyResponseSerializer,
+    PasswordResetVerifySerializer,
     PatientRegistrationResponseSerializer,
     PatientRegistrationSerializer,
     RegenerateBackupCodesSerializer,
@@ -45,7 +58,7 @@ from .serializers import (
     VerifyOTPResponseSerializer,
     VerifyOTPSerializer,
 )
-from .tasks import send_verification_email_task
+from .tasks import send_password_reset_email_task, send_verification_email_task
 
 User = get_user_model()
 
@@ -1722,6 +1735,276 @@ class GoogleLinkAccountView(APIView):
 
             return Response({
                 'message': 'Google account linked successfully'
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ============================================================================
+# Password Reset Views
+# ============================================================================
+
+class PasswordResetRequestView(APIView):
+    """
+    Password Reset Request Endpoint
+
+    Allows users to request a password reset OTP.
+    OTP is sent to the user's email address.
+    """
+
+    permission_classes = []  # Public endpoint
+
+    @swagger_auto_schema(
+        operation_id='password_reset_request',
+        operation_description="""
+        Request a password reset OTP.
+
+        **Process:**
+        1. Validate email exists in the system
+        2. Check for cooldown period (existing valid OTP)
+        3. Generate new 6-digit OTP
+        4. Send OTP via email (background task)
+        5. Return success message
+
+        **Cooldown:**
+        - Users cannot request a new OTP until the previous one expires
+        - Default expiry time is 5 minutes (configurable via PASSWORD_RESET_OTP_EXPIRY_MINUTES)
+
+        **Note:**
+        - For security, the response is the same whether the email exists or not
+        - The actual validation only prevents rate limiting abuse
+        """,
+        request_body=PasswordResetRequestSerializer,
+        responses={
+            200: openapi.Response(
+                description="Password reset OTP sent",
+                schema=PasswordResetRequestResponseSerializer,
+                examples={
+                    'application/json': {
+                        'message': 'If an account exists with this email, a password reset code has been sent.',
+                        'email': 'user@example.com'
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Validation error",
+                examples={
+                    'application/json': {
+                        'email': ['No account found with this email address.']
+                    }
+                }
+            ),
+            429: openapi.Response(
+                description="Rate limited - OTP already sent",
+                examples={
+                    'application/json': {
+                        'email': ['A password reset code was recently sent. Please wait 4m 30s before requesting a new one.']
+                    }
+                }
+            )
+        },
+        tags=['Password Reset']
+    )
+    def post(self, request):
+        """Request a password reset OTP."""
+        serializer = PasswordResetRequestSerializer(data=request.data)
+
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            user = User.objects.get(email__iexact=email)
+
+            # Create OTP and send email
+            otp_instance, otp_plain = PasswordResetOTP.create_for_user(user)
+            send_password_reset_email_task.delay(user.id, otp_plain)
+
+            return Response({
+                'message': 'If an account exists with this email, a password reset code has been sent.',
+                'email': user.email
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PasswordResetVerifyView(APIView):
+    """
+    Password Reset OTP Verification Endpoint
+
+    Verifies the OTP and returns a temporary token for password reset.
+    """
+
+    permission_classes = []  # Public endpoint
+
+    @swagger_auto_schema(
+        operation_id='password_reset_verify',
+        operation_description="""
+        Verify password reset OTP and get a temporary reset token.
+
+        **Process:**
+        1. Validate email and OTP format
+        2. Check if user exists
+        3. Find valid (non-expired, non-used) OTP for user
+        4. Verify OTP against stored hash
+        5. Mark OTP as used
+        6. Generate temporary reset token
+        7. Return reset token
+
+        **Token Usage:**
+        - The reset_token is valid for a limited time (default 10 minutes)
+        - Use this token in the Authorization header when calling the password update endpoint
+        - Format: `Authorization: Bearer <reset_token>`
+
+        **OTP Validation:**
+        - OTP must be exactly 6 digits
+        - OTP must not be expired
+        - OTP must not have been used before
+        - OTP must match the stored hash
+        """,
+        request_body=PasswordResetVerifySerializer,
+        responses={
+            200: openapi.Response(
+                description="OTP verified successfully",
+                schema=PasswordResetVerifyResponseSerializer,
+                examples={
+                    'application/json': {
+                        'message': 'OTP verified successfully. Use the reset token to set your new password.',
+                        'reset_token': 'a1b2c3d4e5f6...'
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Validation error",
+                examples={
+                    'application/json': {
+                        'otp': ['Invalid OTP code.']
+                    }
+                }
+            )
+        },
+        tags=['Password Reset']
+    )
+    def post(self, request):
+        """Verify password reset OTP."""
+        serializer = PasswordResetVerifySerializer(data=request.data)
+
+        if serializer.is_valid():
+            otp_instance = serializer.validated_data['otp_instance']
+            user = serializer.validated_data['user']
+
+            # Mark OTP as used
+            otp_instance.is_used = True
+            otp_instance.save(update_fields=['is_used'])
+
+            # Generate temporary reset token
+            reset_token = PasswordResetToken.create_for_user(user)
+
+            return Response({
+                'message': 'OTP verified successfully. Use the reset token to set your new password.',
+                'reset_token': reset_token.token
+            }, status=status.HTTP_200_OK)
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class PasswordResetConfirmView(APIView):
+    """
+    Password Reset Confirmation Endpoint
+
+    Updates the user's password using the temporary reset token.
+    The reset token must be provided in the Authorization header.
+    """
+
+    authentication_classes = []  # Disable JWT auth - token verified manually
+    permission_classes = []  # Public endpoint - token verified manually
+
+    @swagger_auto_schema(
+        operation_id='password_reset_confirm',
+        operation_description="""
+        Reset password using the temporary reset token.
+
+        **Process:**
+        1. Extract reset token from Authorization header
+        2. Validate token is valid and not expired
+        3. Validate new password meets security requirements
+        4. Validate password confirmation matches
+        5. Update user's password
+        6. Invalidate reset token
+        7. Return success message
+
+        **Authorization:**
+        - The reset token must be provided in the Authorization header
+        - Format: `Authorization: Bearer <reset_token>`
+        - This token is obtained from the /password/reset/verify/ endpoint
+
+        **Password Requirements:**
+        - Minimum 8 characters
+        - Cannot be too similar to personal information
+        - Cannot be a commonly used password
+        - Cannot be entirely numeric
+
+        **Note:**
+        - The reset token can only be used once
+        - After successful password reset, user should login again
+        """,
+        request_body=PasswordResetConfirmSerializer,
+        responses={
+            200: openapi.Response(
+                description="Password reset successfully",
+                schema=PasswordResetConfirmResponseSerializer,
+                examples={
+                    'application/json': {
+                        'message': 'Password has been reset successfully. Please login with your new password.'
+                    }
+                }
+            ),
+            400: openapi.Response(
+                description="Validation error",
+                examples={
+                    'application/json': {
+                        'new_password': ['This password is too short.'],
+                        'new_password_confirm': ['Passwords do not match.']
+                    }
+                }
+            ),
+            401: openapi.Response(
+                description="Invalid or expired reset token",
+                examples={
+                    'application/json': {
+                        'detail': 'Invalid or expired reset token. Please request a new password reset.'
+                    }
+                }
+            )
+        },
+        tags=['Password Reset'],
+        security=[{'Bearer': []}]
+    )
+    def post(self, request):
+        """Reset password with new password."""
+        # Extract token from Authorization header
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if not auth_header.startswith('Bearer '):
+            return Response({
+                'detail': 'Reset token is required. Use Authorization: Bearer <reset_token>'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        token = auth_header.split(' ', 1)[1]
+
+        # Verify token and get user
+        user = PasswordResetToken.get_and_invalidate(token)
+        if not user:
+            return Response({
+                'detail': 'Invalid or expired reset token. Please request a new password reset.'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Validate password
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+
+        if serializer.is_valid():
+            # Update password
+            user.set_password(serializer.validated_data['new_password'])
+            user.save(update_fields=['password'])
+
+            return Response({
+                'message': 'Password has been reset successfully. Please login with your new password.'
             }, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

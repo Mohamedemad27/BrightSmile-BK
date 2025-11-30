@@ -7,7 +7,16 @@ from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from utils.validators import phone_number_validator, validate_date_of_birth
-from .models import BackupCode, Doctor, EmailVerificationOTP, Patient, TwoFactorAuth, TwoFactorToken
+from .models import (
+    BackupCode,
+    Doctor,
+    EmailVerificationOTP,
+    PasswordResetOTP,
+    PasswordResetToken,
+    Patient,
+    TwoFactorAuth,
+    TwoFactorToken,
+)
 
 User = get_user_model()
 
@@ -1093,5 +1102,151 @@ class GoogleDoctorRegistrationResponseSerializer(serializers.Serializer):
 
 class GoogleLinkAccountResponseSerializer(serializers.Serializer):
     """Serializer for Google account link response."""
+
+    message = serializers.CharField(help_text="Success message")
+
+
+# ============================================================================
+# Password Reset Serializers
+# ============================================================================
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    """Serializer for requesting a password reset OTP."""
+
+    email = serializers.EmailField(
+        help_text="Email address to send password reset OTP to"
+    )
+
+    def validate_email(self, value):
+        """Validate email exists."""
+        email = value.lower()
+        try:
+            user = User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("No account found with this email address.")
+
+        # Check for existing valid OTP (cooldown)
+        existing_otp = PasswordResetOTP.objects.filter(
+            user=user,
+            is_used=False,
+            expires_at__gt=timezone.now()
+        ).first()
+
+        if existing_otp:
+            remaining_seconds = (existing_otp.expires_at - timezone.now()).total_seconds()
+            remaining_minutes = int(remaining_seconds // 60)
+            remaining_secs = int(remaining_seconds % 60)
+            raise serializers.ValidationError(
+                f"A password reset code was recently sent. Please wait {remaining_minutes}m {remaining_secs}s before requesting a new one."
+            )
+
+        return email
+
+
+class PasswordResetVerifySerializer(serializers.Serializer):
+    """Serializer for verifying password reset OTP."""
+
+    email = serializers.EmailField(
+        help_text="Email address"
+    )
+    otp = serializers.CharField(
+        min_length=6,
+        max_length=6,
+        help_text="6-digit OTP code"
+    )
+
+    def validate_email(self, value):
+        """Validate email exists."""
+        email = value.lower()
+        try:
+            User.objects.get(email__iexact=email)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("No account found with this email address.")
+        return email
+
+    def validate_otp(self, value):
+        """Validate OTP is numeric."""
+        if not value.isdigit():
+            raise serializers.ValidationError("OTP must contain only digits.")
+        return value
+
+    def validate(self, attrs):
+        """Validate OTP against stored hash."""
+        email = attrs['email']
+        otp = attrs['otp']
+
+        user = User.objects.get(email__iexact=email)
+
+        # Find valid OTP for user
+        otp_instance = PasswordResetOTP.objects.filter(
+            user=user,
+            is_used=False,
+            expires_at__gt=timezone.now()
+        ).order_by('-created_at').first()
+
+        if not otp_instance:
+            raise serializers.ValidationError({
+                'otp': "No valid OTP found. Please request a new one."
+            })
+
+        if not otp_instance.verify(otp):
+            raise serializers.ValidationError({
+                'otp': "Invalid OTP code."
+            })
+
+        # Store verified OTP instance and user for use in view
+        attrs['otp_instance'] = otp_instance
+        attrs['user'] = user
+
+        return attrs
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    """Serializer for confirming password reset with new password."""
+
+    new_password = serializers.CharField(
+        write_only=True,
+        style={'input_type': 'password'},
+        help_text="New password (min 8 characters)"
+    )
+    new_password_confirm = serializers.CharField(
+        write_only=True,
+        style={'input_type': 'password'},
+        help_text="Confirm new password"
+    )
+
+    def validate_new_password(self, value):
+        """Validate new password using Django's password validators."""
+        try:
+            validate_password(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(list(e.messages))
+        return value
+
+    def validate(self, attrs):
+        """Validate new passwords match."""
+        if attrs['new_password'] != attrs['new_password_confirm']:
+            raise serializers.ValidationError({
+                'new_password_confirm': "Passwords do not match."
+            })
+        return attrs
+
+
+class PasswordResetRequestResponseSerializer(serializers.Serializer):
+    """Serializer for password reset request response."""
+
+    message = serializers.CharField(help_text="Response message")
+    email = serializers.EmailField(help_text="Email address")
+
+
+class PasswordResetVerifyResponseSerializer(serializers.Serializer):
+    """Serializer for password reset OTP verification response."""
+
+    message = serializers.CharField(help_text="Success message")
+    reset_token = serializers.CharField(help_text="Temporary token for password reset (use in Authorization header)")
+
+
+class PasswordResetConfirmResponseSerializer(serializers.Serializer):
+    """Serializer for password reset confirmation response."""
 
     message = serializers.CharField(help_text="Success message")

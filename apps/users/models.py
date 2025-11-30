@@ -792,3 +792,234 @@ class TwoFactorToken(models.Model):
         except cls.DoesNotExist:
             pass
         return None
+
+
+class PasswordResetOTP(models.Model):
+    """
+    Model to store password reset OTPs.
+
+    Similar to EmailVerificationOTP but specifically for password reset flow.
+    OTP expiry is configured via PASSWORD_RESET_OTP_EXPIRY_MINUTES setting.
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='password_reset_otps'
+    )
+    otp_hash = models.CharField(
+        max_length=128,
+        help_text="Hashed OTP for secure verification"
+    )
+    otp_plain = models.CharField(
+        max_length=6,
+        help_text="Plain OTP for admin display only"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Password Reset OTP'
+        verbose_name_plural = 'Password Reset OTPs'
+        indexes = [
+            models.Index(fields=['user', 'is_used'], name='pwd_reset_otp_user_used_idx'),
+            models.Index(fields=['expires_at'], name='pwd_reset_otp_expires_idx'),
+        ]
+
+    def __str__(self):
+        return f"Password Reset OTP for {self.user.email} - {'Used' if self.is_used else 'Active'}"
+
+    def save(self, *args, **kwargs):
+        """Set expires_at if not already set."""
+        if not self.expires_at:
+            expiry_minutes = getattr(settings, 'PASSWORD_RESET_OTP_EXPIRY_MINUTES', 5)
+            self.expires_at = timezone.now() + timedelta(minutes=expiry_minutes)
+        super().save(*args, **kwargs)
+
+    @property
+    def is_expired(self):
+        """Check if OTP has expired."""
+        return timezone.now() > self.expires_at
+
+    @property
+    def is_valid(self):
+        """Check if OTP is still valid (not used and not expired)."""
+        return not self.is_used and not self.is_expired
+
+    def verify(self, otp):
+        """
+        Verify the provided OTP against the stored hash.
+
+        Args:
+            otp: The plain text OTP to verify
+
+        Returns:
+            bool: True if OTP is valid and matches, False otherwise
+        """
+        if not self.is_valid:
+            return False
+        return check_password(otp, self.otp_hash)
+
+    @classmethod
+    def generate_otp(cls):
+        """
+        Generate a cryptographically secure 6-digit OTP.
+
+        Returns:
+            str: 6-digit OTP string
+        """
+        return ''.join(str(secrets.randbelow(10)) for _ in range(6))
+
+    @classmethod
+    def create_for_user(cls, user):
+        """
+        Create a new password reset OTP for a user.
+
+        Args:
+            user: The user to create OTP for
+
+        Returns:
+            tuple: (PasswordResetOTP instance, plain OTP string)
+        """
+        otp_plain = cls.generate_otp()
+        otp_hash = make_password(otp_plain)
+
+        otp_instance = cls.objects.create(
+            user=user,
+            otp_hash=otp_hash,
+            otp_plain=otp_plain,
+        )
+
+        return otp_instance, otp_plain
+
+
+class PasswordResetToken(models.Model):
+    """
+    Temporary token for password reset after OTP verification.
+
+    This token is issued after successful OTP verification
+    and can only be used to reset the password.
+    Token expiry is configured via PASSWORD_RESET_TOKEN_EXPIRY_MINUTES setting.
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='password_reset_tokens'
+    )
+    token = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text="Temporary token for password reset"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = 'Password Reset Token'
+        verbose_name_plural = 'Password Reset Tokens'
+        indexes = [
+            models.Index(fields=['token', 'is_used'], name='pwd_reset_token_used_idx'),
+            models.Index(fields=['expires_at'], name='pwd_reset_token_expires_idx'),
+        ]
+
+    def __str__(self):
+        status = 'Used' if self.is_used else 'Active'
+        return f"Password Reset Token for {self.user.email} - {status}"
+
+    def save(self, *args, **kwargs):
+        """Set expires_at if not already set."""
+        if not self.expires_at:
+            expiry_minutes = getattr(settings, 'PASSWORD_RESET_TOKEN_EXPIRY_MINUTES', 10)
+            self.expires_at = timezone.now() + timedelta(minutes=expiry_minutes)
+        super().save(*args, **kwargs)
+
+    @property
+    def is_expired(self):
+        """Check if token has expired."""
+        return timezone.now() > self.expires_at
+
+    @property
+    def is_valid(self):
+        """Check if token is still valid (not used and not expired)."""
+        return not self.is_used and not self.is_expired
+
+    def mark_used(self):
+        """Mark this token as used."""
+        self.is_used = True
+        self.save(update_fields=['is_used'])
+
+    @classmethod
+    def generate_token(cls):
+        """
+        Generate a cryptographically secure token.
+
+        Returns:
+            str: 64-character hex token
+        """
+        return secrets.token_hex(32)
+
+    @classmethod
+    def create_for_user(cls, user):
+        """
+        Create a new password reset token for a user.
+
+        Invalidates any existing tokens for the user.
+
+        Args:
+            user: User instance
+
+        Returns:
+            PasswordResetToken: The created token instance
+        """
+        # Invalidate existing tokens
+        cls.objects.filter(user=user, is_used=False).update(is_used=True)
+
+        token = cls.generate_token()
+        return cls.objects.create(
+            user=user,
+            token=token
+        )
+
+    @classmethod
+    def verify_token(cls, token):
+        """
+        Verify a password reset token.
+
+        Args:
+            token: The token string to verify
+
+        Returns:
+            User or None: The user if token is valid, None otherwise
+        """
+        try:
+            token_obj = cls.objects.get(token=token, is_used=False)
+            if token_obj.is_valid:
+                return token_obj.user
+        except cls.DoesNotExist:
+            pass
+        return None
+
+    @classmethod
+    def get_and_invalidate(cls, token):
+        """
+        Get user from token and mark it as used.
+
+        Args:
+            token: The token string
+
+        Returns:
+            User or None: The user if token was valid, None otherwise
+        """
+        try:
+            token_obj = cls.objects.get(token=token, is_used=False)
+            if token_obj.is_valid:
+                token_obj.mark_used()
+                return token_obj.user
+        except cls.DoesNotExist:
+            pass
+        return None

@@ -167,6 +167,8 @@ ENVIRONMENT = config('ENVIRONMENT', default='dev')
 
 # OTP Configuration
 OTP_EXPIRY_MINUTES = config('OTP_EXPIRY_MINUTES', default=5, cast=int)
+PASSWORD_RESET_OTP_EXPIRY_MINUTES = config('PASSWORD_RESET_OTP_EXPIRY_MINUTES', default=5, cast=int)
+PASSWORD_RESET_TOKEN_EXPIRY_MINUTES = config('PASSWORD_RESET_TOKEN_EXPIRY_MINUTES', default=10, cast=int)
 
 # Email Configuration
 EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
