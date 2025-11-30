@@ -9,6 +9,9 @@ from .views import (
     GooglePatientAuthView,
     LoginView,
     LogoutView,
+    PasswordResetConfirmView,
+    PasswordResetRequestView,
+    PasswordResetVerifyView,
     PatientRegistrationView,
     RequestOTPView,
     TokenRefreshView,
@@ -49,4 +52,9 @@ urlpatterns = [
     path('auth/google/patient/', GooglePatientAuthView.as_view(), name='google-patient-auth'),
     path('auth/google/doctor/', GoogleDoctorAuthView.as_view(), name='google-doctor-auth'),
     path('auth/google/link/', GoogleLinkAccountView.as_view(), name='google-link-account'),
+
+    # Password Reset endpoints
+    path('password/reset/request/', PasswordResetRequestView.as_view(), name='password-reset-request'),
+    path('password/reset/verify/', PasswordResetVerifyView.as_view(), name='password-reset-verify'),
+    path('password/reset/confirm/', PasswordResetConfirmView.as_view(), name='password-reset-confirm'),
 ]
