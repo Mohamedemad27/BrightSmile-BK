@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from .models import Admin as AdminModel, Doctor, EmailVerificationOTP, Patient, User
+from .models import Admin as AdminModel, AdminRole, AdminRoleAssignment, Doctor, EmailVerificationOTP, Patient, Secretary, User
 
 
 @admin.register(User)
@@ -141,6 +141,51 @@ class AdminProfileAdmin(admin.ModelAdmin):
     def get_is_staff(self, obj):
         """Return the admin's staff status."""
         return obj.user.is_staff
+
+
+@admin.register(Secretary)
+class SecretaryAdmin(admin.ModelAdmin):
+    list_display = ['get_email', 'get_full_name', 'get_doctor_name', 'phone_number', 'is_active', 'created_at']
+    list_filter = ['is_active', 'created_at']
+    search_fields = ['user__email', 'user__first_name', 'user__last_name', 'doctor__user__first_name']
+    ordering = ['-created_at']
+    readonly_fields = ['created_at', 'updated_at']
+    raw_id_fields = ['user', 'doctor']
+
+    @admin.display(description='Email', ordering='user__email')
+    def get_email(self, obj):
+        return obj.user.email
+
+    @admin.display(description='Full Name', ordering='user__first_name')
+    def get_full_name(self, obj):
+        return obj.user.get_full_name()
+
+    @admin.display(description='Doctor')
+    def get_doctor_name(self, obj):
+        return obj.doctor.full_name
+
+
+@admin.register(AdminRole)
+class AdminRoleAdmin(admin.ModelAdmin):
+    list_display = ['name', 'is_system', 'get_assignment_count', 'created_at']
+    list_filter = ['is_system']
+    search_fields = ['name']
+    filter_horizontal = ['permissions']
+
+    @admin.display(description='Assigned Users')
+    def get_assignment_count(self, obj):
+        return obj.assignments.count()
+
+
+@admin.register(AdminRoleAssignment)
+class AdminRoleAssignmentAdmin(admin.ModelAdmin):
+    list_display = ['get_user_email', 'role', 'assigned_at']
+    list_filter = ['role']
+    raw_id_fields = ['user']
+
+    @admin.display(description='User', ordering='user__email')
+    def get_user_email(self, obj):
+        return obj.user.email
 
 
 @admin.register(EmailVerificationOTP)

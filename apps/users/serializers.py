@@ -6,6 +6,7 @@ from django.utils import timezone
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from apps.core.models import MedicalHistory
 from utils.validators import phone_number_validator, validate_date_of_birth
 from .models import (
     BackupCode,
@@ -81,6 +82,10 @@ class PatientRegistrationSerializer(serializers.Serializer):
         max_length=20,
         help_text="Phone number in international format (e.g., +1234567890)"
     )
+    medical_history = serializers.DictField(
+        required=False,
+        help_text="Optional medical history data with boolean condition fields and notes",
+    )
 
     def validate_email(self, value):
         """Check that email is unique."""
@@ -130,6 +135,7 @@ class PatientRegistrationSerializer(serializers.Serializer):
         # Extract patient-specific fields
         date_of_birth = validated_data.pop('date_of_birth')
         phone_number = validated_data.pop('phone_number')
+        medical_history_data = validated_data.pop('medical_history', None)
 
         # Create user
         user = User.objects.create_user(
@@ -148,6 +154,19 @@ class PatientRegistrationSerializer(serializers.Serializer):
             date_of_birth=date_of_birth,
             phone_number=phone_number,
         )
+
+        # Create medical history if provided
+        if medical_history_data:
+            allowed_fields = {
+                'diabetes', 'heart_disease', 'blood_pressure',
+                'allergies', 'bleeding_disorders', 'asthma',
+                'pregnancy', 'smoking', 'previous_dental_surgery', 'notes',
+            }
+            filtered_data = {
+                k: v for k, v in medical_history_data.items()
+                if k in allowed_fields
+            }
+            MedicalHistory.objects.create(user=user, **filtered_data)
 
         return user
 

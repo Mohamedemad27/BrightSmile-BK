@@ -1,5 +1,6 @@
 import base64
 import secrets
+import uuid
 from datetime import date, timedelta
 from io import BytesIO
 
@@ -39,6 +40,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         ('patient', 'Patient'),
         ('doctor', 'Doctor'),
         ('admin', 'Admin'),
+        ('secretary', 'Secretary'),
     ]
 
     AUTH_PROVIDER_CHOICES = [
@@ -46,11 +48,13 @@ class User(AbstractBaseUser, PermissionsMixin):
         ('google', 'Google'),
     ]
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
     # Authentication & Identification
-    email = models.EmailField(unique=True, max_length=255)  # unique=True creates an index
+    email = models.EmailField(unique=True, max_length=255)
     first_name = models.CharField(max_length=150)
     last_name = models.CharField(max_length=150)
-    user_type = models.CharField(max_length=10, choices=USER_TYPE_CHOICES, db_index=True)
+    user_type = models.CharField(max_length=15, choices=USER_TYPE_CHOICES, db_index=True)
 
     # OAuth fields
     google_id = models.CharField(
@@ -74,6 +78,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_staff = models.BooleanField(default=False)
     is_verified = models.BooleanField(default=False, db_index=True)
     is_2fa_enabled = models.BooleanField(default=False, db_index=True)
+
+    # Notification preferences
+    push_notifications = models.BooleanField(default=True)
+    email_notifications = models.BooleanField(default=True)
 
     # Timestamps
     last_login = models.DateTimeField(null=True, blank=True)
@@ -219,17 +227,36 @@ class Doctor(models.Model):
         validators=[phone_number_validator],
         db_index=True
     )
+    specialty = models.CharField(max_length=100, blank=True, default='')
+    rating = models.DecimalField(
+        max_digits=3, decimal_places=1, default=0.0, db_index=True,
+    )
+    total_reviews = models.PositiveIntegerField(default=0)
+    profile_image_url = models.URLField(max_length=500, blank=True, default='')
+    bio = models.TextField(max_length=1000, blank=True, default='')
+    location = models.CharField(max_length=255, blank=True, default='')
+    working_hours = models.CharField(max_length=100, blank=True, default='')
+    facebook_url = models.URLField(max_length=300, blank=True, default='')
+    instagram_url = models.URLField(max_length=300, blank=True, default='')
+    twitter_url = models.URLField(max_length=300, blank=True, default='')
+    linkedin_url = models.URLField(max_length=300, blank=True, default='')
+    categories = models.ManyToManyField(
+        'core.ServiceCategory',
+        related_name='doctors',
+        blank=True,
+    )
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ['-rating', '-created_at']
         verbose_name = 'Doctor'
         verbose_name_plural = 'Doctors'
         indexes = [
             models.Index(fields=['phone_number'], name='doctor_phone_idx'),
+            models.Index(fields=['-rating'], name='doctor_rating_idx'),
         ]
 
     def __str__(self):
@@ -287,6 +314,106 @@ class Admin(models.Model):
         return self.user.get_full_name()
 
 
+class Secretary(models.Model):
+    """
+    Secretary profile model that extends User through a OneToOne relationship.
+    A secretary is linked to a specific doctor and can manage that doctor's data.
+    """
+
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='secretary_profile',
+        primary_key=True
+    )
+    doctor = models.ForeignKey(
+        Doctor,
+        on_delete=models.CASCADE,
+        related_name='secretaries',
+    )
+    phone_number = models.CharField(
+        max_length=20,
+        validators=[phone_number_validator],
+        blank=True,
+        default=''
+    )
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Secretary'
+        verbose_name_plural = 'Secretaries'
+
+    def __str__(self):
+        return f"Secretary: {self.user.get_full_name()} for Dr. {self.doctor.full_name}"
+
+    @property
+    def email(self):
+        return self.user.email
+
+    @property
+    def full_name(self):
+        return self.user.get_full_name()
+
+
+class AdminRole(models.Model):
+    """
+    Custom admin role with a configurable set of permissions.
+    Super-admins can create roles (e.g. "Appointment Manager") and assign
+    a subset of admin permissions to them.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True, default='')
+    permissions = models.ManyToManyField(
+        'auth.Permission',
+        blank=True,
+        related_name='admin_roles',
+    )
+    is_system = models.BooleanField(
+        default=False,
+        help_text='System roles (e.g. Super Admin) cannot be deleted.'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name = 'Admin Role'
+        verbose_name_plural = 'Admin Roles'
+
+    def __str__(self):
+        return self.name
+
+
+class AdminRoleAssignment(models.Model):
+    """Links an admin user to a specific AdminRole."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='admin_role_assignment',
+    )
+    role = models.ForeignKey(
+        AdminRole,
+        on_delete=models.CASCADE,
+        related_name='assignments',
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Admin Role Assignment'
+        verbose_name_plural = 'Admin Role Assignments'
+
+    def __str__(self):
+        return f"{self.user.get_full_name()} → {self.role.name}"
+
+
 class EmailVerificationOTP(models.Model):
     """
     Model to store email verification OTPs.
@@ -295,6 +422,7 @@ class EmailVerificationOTP(models.Model):
     OTPs are also cached in Redis for fast lookups with configurable expiration.
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -543,6 +671,7 @@ class BackupCode(models.Model):
     Each code can only be used once.
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -673,6 +802,7 @@ class TwoFactorToken(models.Model):
     Token expires after a short time (default 5 minutes).
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -802,6 +932,7 @@ class PasswordResetOTP(models.Model):
     OTP expiry is configured via PASSWORD_RESET_OTP_EXPIRY_MINUTES setting.
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,
@@ -904,6 +1035,7 @@ class PasswordResetToken(models.Model):
     Token expiry is configured via PASSWORD_RESET_TOKEN_EXPIRY_MINUTES setting.
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         User,
         on_delete=models.CASCADE,

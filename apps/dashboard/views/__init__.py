@@ -1,0 +1,37 @@
+from .common_views import DashboardMeView
+from .admin_views import (
+    AdminUserListView,
+    AdminUserDetailView,
+    AdminDoctorListView,
+    AdminDoctorApproveView,
+    AdminAppointmentListView,
+    AdminReviewListView,
+    AdminReviewDeleteView,
+    AdminCategoryListCreateView,
+    AdminCategoryDetailView,
+    AdminHealthTipListCreateView,
+    AdminHealthTipDetailView,
+    AdminAnalyticsView,
+    AdminRoleListCreateView,
+    AdminRoleDetailView,
+    AdminRoleAssignView,
+    AdminRolePermissionsView,
+)
+from .doctor_views import (
+    DoctorProfileView,
+    DoctorAppointmentListView,
+    DoctorAppointmentStatusView,
+    DoctorPatientListView,
+    DoctorServiceListCreateView,
+    DoctorServiceDetailView,
+    DoctorSecretaryListCreateView,
+    DoctorSecretaryDetailView,
+    DoctorReviewListView,
+    DoctorAnalyticsView,
+)
+from .secretary_views import (
+    SecretaryDoctorView,
+    SecretaryAppointmentListView,
+    SecretaryAppointmentStatusView,
+    SecretaryPatientListView,
+)

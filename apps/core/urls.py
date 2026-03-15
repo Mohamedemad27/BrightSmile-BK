@@ -1,8 +1,49 @@
 from django.urls import path
-from .views import HealthCheckView
+
+from .views import (
+    AppointmentDetailView,
+    AppointmentListCreateView,
+    AppointmentReviewView,
+    AppointmentStatusView,
+    ChatbotView,
+    DailyTipView,
+    DoctorDetailView,
+    DoctorsByCategoryView,
+    FavoriteDoctorIdsView,
+    FavoriteDoctorListView,
+    FavoriteDoctorToggleView,
+    HealthCheckView,
+    MedicalHistoryView,
+    NotificationListView,
+    NotificationReadAllView,
+    NotificationReadView,
+    ProfileView,
+    ServiceCategoriesView,
+    TopDoctorsView,
+    UpcomingAppointmentView,
+)
 
 app_name = 'core'
 
 urlpatterns = [
     path('health/', HealthCheckView.as_view(), name='health_check'),
+    path('chatbot/', ChatbotView.as_view(), name='chatbot'),
+    path('tips/daily/', DailyTipView.as_view(), name='daily_tip'),
+    path('profile/', ProfileView.as_view(), name='profile'),
+    path('notifications/', NotificationListView.as_view(), name='notifications'),
+    path('notifications/read-all/', NotificationReadAllView.as_view(), name='notifications_read_all'),
+    path('notifications/<uuid:notification_id>/read/', NotificationReadView.as_view(), name='notification_read'),
+    path('doctors/top/', TopDoctorsView.as_view(), name='top_doctors'),
+    path('doctors/<uuid:doctor_id>/', DoctorDetailView.as_view(), name='doctor_detail'),
+    path('doctors/', DoctorsByCategoryView.as_view(), name='doctors_by_category'),
+    path('categories/', ServiceCategoriesView.as_view(), name='categories'),
+    path('favorites/', FavoriteDoctorListView.as_view(), name='favorites'),
+    path('favorites/ids/', FavoriteDoctorIdsView.as_view(), name='favorite_ids'),
+    path('favorites/<uuid:doctor_id>/toggle/', FavoriteDoctorToggleView.as_view(), name='favorite_toggle'),
+    path('medical-history/', MedicalHistoryView.as_view(), name='medical_history'),
+    path('appointments/upcoming/', UpcomingAppointmentView.as_view(), name='upcoming_appointment'),
+    path('appointments/<uuid:appointment_id>/status/', AppointmentStatusView.as_view(), name='appointment_status'),
+    path('appointments/<uuid:appointment_id>/review/', AppointmentReviewView.as_view(), name='appointment_review'),
+    path('appointments/<uuid:appointment_id>/', AppointmentDetailView.as_view(), name='appointment_detail'),
+    path('appointments/', AppointmentListCreateView.as_view(), name='appointments'),
 ]

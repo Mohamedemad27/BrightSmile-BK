@@ -31,7 +31,8 @@ INSTALLED_APPS = [
 
     # Local apps
     'apps.core',
-    'apps.users'
+    'apps.users',
+    'apps.dashboard',
 ]
 
 MIDDLEWARE = [
