@@ -52,6 +52,10 @@ class HasDashboardPermission(BasePermission):
         if required is None:
             return True
 
+        # Django superusers always have all permissions
+        if request.user.is_superuser:
+            return True
+
         # Super admins (system role) always have all permissions
         assignment = getattr(request.user, 'admin_role_assignment', None)
         if assignment is None:

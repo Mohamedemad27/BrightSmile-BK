@@ -25,13 +25,12 @@ from apps.users.permissions import (
     IsAdmin,
 )
 from apps.dashboard.serializers.dashboard_serializers import (
-    AdminAppointmentSerializer,
+    AdminAppointmentListSerializer,
     AdminCategorySerializer,
     AdminDoctorListSerializer,
     AdminHealthTipSerializer,
-    AdminReviewSerializer,
+    AdminReviewListSerializer,
     AdminRoleAssignSerializer,
-    AdminRoleDetailSerializer,
     AdminRoleSerializer,
     AdminUserDetailSerializer,
     AdminUserListSerializer,
@@ -230,7 +229,7 @@ class AdminAppointmentListView(APIView):
 
         paginator = StandardPagination()
         page = paginator.paginate_queryset(qs, request)
-        serializer = AdminAppointmentSerializer(page, many=True)
+        serializer = AdminAppointmentListSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
 
 
@@ -254,7 +253,7 @@ class AdminReviewListView(APIView):
 
         paginator = StandardPagination()
         page = paginator.paginate_queryset(qs, request)
-        serializer = AdminReviewSerializer(page, many=True)
+        serializer = AdminReviewListSerializer(page, many=True)
         return paginator.get_paginated_response(serializer.data)
 
 
@@ -450,11 +449,11 @@ class AdminRoleListCreateView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
-        serializer = AdminRoleDetailSerializer(data=request.data)
+        serializer = AdminRoleSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(
-            AdminRoleDetailSerializer(serializer.instance).data,
+            AdminRoleSerializer(serializer.instance).data,
             status=status.HTTP_201_CREATED,
         )
 
@@ -473,7 +472,7 @@ class AdminRoleDetailView(APIView):
                 {'detail': 'Role not found.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        return Response(AdminRoleDetailSerializer(role).data)
+        return Response(AdminRoleSerializer(role).data)
 
     def patch(self, request, role_id):
         try:
@@ -484,10 +483,10 @@ class AdminRoleDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        serializer = AdminRoleDetailSerializer(role, data=request.data, partial=True)
+        serializer = AdminRoleSerializer(role, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(AdminRoleDetailSerializer(serializer.instance).data)
+        return Response(AdminRoleSerializer(serializer.instance).data)
 
     def delete(self, request, role_id):
         try:
