@@ -1,0 +1,202 @@
+{% extends "reports/base_report.html" %}
+
+{% block content %}
+<!-- ========================
+     DOCTOR INFO
+     ======================== -->
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">D</span>
+        Doctor Information
+    </div>
+    <div class="info-grid">
+        <div class="info-item">
+            <span class="info-label">Name</span>
+            <span class="info-value">Dr. {{ doctor.user.first_name }} {{ doctor.user.last_name }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Specialty</span>
+            <span class="info-value">{{ doctor.specialty }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Email</span>
+            <span class="info-value">{{ doctor.user.email }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Phone</span>
+            <span class="info-value">{{ doctor.phone_number }}</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Rating</span>
+            <span class="info-value">{{ doctor.rating }} / 5.0 ({{ doctor.total_reviews }} reviews)</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Location</span>
+            <span class="info-value">{{ doctor.location }}</span>
+        </div>
+    </div>
+</div>
+
+<!-- ========================
+     SUMMARY
+     ======================== -->
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">S</span>
+        Summary
+    </div>
+    <div class="summary-grid summary-grid-3">
+        <div class="summary-card">
+            <div class="summary-card-value">{{ total_patients }}</div>
+            <div class="summary-card-label">Total Patients</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value info">{{ new_patients }}</div>
+            <div class="summary-card-label">New This Month</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value success">{{ returning_patients }}</div>
+            <div class="summary-card-label">Returning Patients</div>
+        </div>
+    </div>
+</div>
+
+<!-- ========================
+     CHARTS
+     ======================== -->
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">C</span>
+        Visual Overview
+    </div>
+    <div class="chart-row">
+        <!-- xhtml2pdf note: SVG donut charts are not supported; show legend/table instead -->
+        <div class="chart-box">
+            <div class="chart-box-title">Patient Composition</div>
+            <div class="donut-chart-wrap">
+                <div class="section-subtitle text-center">Total: {{ total_patients }}</div>
+                {% if patient_chart_segments %}
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th class="text-center">Count</th>
+                            <th class="text-center">Percent</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for seg in patient_chart_segments %}
+                        <tr>
+                            <td class="text-bold">{{ seg.label }}</td>
+                            <td class="text-center text-bold">{{ seg.value }}</td>
+                            <td class="text-center">{{ seg.percentage }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Horizontal Bars: Top patients by visits -->
+        <div class="chart-box">
+            <div class="chart-box-title">Top Patients by Visits</div>
+            <div class="hbar-chart">
+                {% for p in top_patients_chart %}
+                <div class="hbar-item">
+                    <span class="hbar-label">{{ p.name|truncatewords:3 }}</span>
+                    <div class="hbar-track">
+                        <div class="hbar-fill primary" style="width: {{ p.bar_percent }}%;"></div>
+                    </div>
+                    <span class="hbar-value">{{ p.visits }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ========================
+     PATIENTS LIST
+     ======================== -->
+<div class="section">
+    <div class="section-title">
+        <span class="section-title-icon">P</span>
+        Patients List
+    </div>
+    <div class="section-subtitle">All patients who have had appointments with Dr. {{ doctor.user.last_name }}</div>
+
+    {% if patients %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Patient Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Date of Birth</th>
+                <th class="text-center">Total Visits</th>
+                <th>Last Visit</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for patient in patients %}
+            <tr>
+                <td>{{ forloop.counter }}</td>
+                <td class="text-bold">{{ patient.full_name }}</td>
+                <td>{{ patient.email }}</td>
+                <td>{{ patient.phone_number|default:"-" }}</td>
+                <td>{{ patient.date_of_birth|default:"-" }}</td>
+                <td class="text-center">{{ patient.total_visits }}</td>
+                <td>{{ patient.last_visit|default:"-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No patients found for the selected period.</div>
+    {% endif %}
+</div>
+
+<!-- ========================
+     PATIENT DETAILS (per patient breakdown)
+     ======================== -->
+{% for patient in patients %}
+{% if patient.appointments %}
+<div class="section page-break">
+    <div class="subsection-title">{{ patient.full_name }} - Appointment History</div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Services</th>
+                <th>Status</th>
+                <th class="text-right">Total</th>
+                <th>Notes</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for appt in patient.appointments %}
+            <tr>
+                <td>{{ appt.date }}</td>
+                <td>{{ appt.time_slot }}</td>
+                <td>
+                    {% for svc in appt.services.all %}
+                        {{ svc.name }}{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                </td>
+                <td>
+                    <span class="badge badge-{{ appt.status }}">{{ appt.status }}</span>
+                </td>
+                <td class="text-right">{{ appt.total_price }} EGP</td>
+                <td class="text-small">{{ appt.notes|default:"-"|truncatewords:15 }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endfor %}
+
+{% endblock %}

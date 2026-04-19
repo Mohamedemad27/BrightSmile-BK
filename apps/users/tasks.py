@@ -53,7 +53,18 @@ def send_verification_email_task(self, user_id, otp):
         message = render_to_string('emails/verification_email.txt', context)
         html_message = render_to_string('emails/verification_email.html', context)
 
-        send_mail(
+        logger.info(
+            "Sending verification OTP email | task_id=%s user_id=%s to=%s backend=%s host=%s port=%s tls=%s from=%s",
+            getattr(self.request, 'id', None),
+            user_id,
+            user.email,
+            settings.EMAIL_BACKEND,
+            settings.EMAIL_HOST,
+            settings.EMAIL_PORT,
+            settings.EMAIL_USE_TLS,
+            settings.DEFAULT_FROM_EMAIL,
+        )
+        sent_count = send_mail(
             subject=subject,
             message=message,
             from_email=settings.DEFAULT_FROM_EMAIL,
@@ -62,7 +73,13 @@ def send_verification_email_task(self, user_id, otp):
             fail_silently=False,
         )
 
-        logger.info(f"Verification email sent successfully to {user.email}")
+        logger.info(
+            "Verification OTP email send_mail completed | task_id=%s user_id=%s to=%s sent_count=%s",
+            getattr(self.request, 'id', None),
+            user_id,
+            user.email,
+            sent_count,
+        )
         return True
 
     except User.DoesNotExist:
@@ -70,7 +87,7 @@ def send_verification_email_task(self, user_id, otp):
         return False
 
     except Exception as e:
-        logger.error(f"Failed to send verification email to user {user_id}: {str(e)}")
+        logger.exception("Failed to send verification OTP email | task_id=%s user_id=%s", getattr(self.request, 'id', None), user_id)
         # Retry the task
         raise self.retry(exc=e)
 
@@ -98,7 +115,18 @@ def send_password_reset_email_task(self, user_id, otp):
         message = render_to_string('emails/password_reset_email.txt', context)
         html_message = render_to_string('emails/password_reset_email.html', context)
 
-        send_mail(
+        logger.info(
+            "Sending password reset OTP email | task_id=%s user_id=%s to=%s backend=%s host=%s port=%s tls=%s from=%s",
+            getattr(self.request, 'id', None),
+            user_id,
+            user.email,
+            settings.EMAIL_BACKEND,
+            settings.EMAIL_HOST,
+            settings.EMAIL_PORT,
+            settings.EMAIL_USE_TLS,
+            settings.DEFAULT_FROM_EMAIL,
+        )
+        sent_count = send_mail(
             subject=subject,
             message=message,
             from_email=settings.DEFAULT_FROM_EMAIL,
@@ -107,7 +135,13 @@ def send_password_reset_email_task(self, user_id, otp):
             fail_silently=False,
         )
 
-        logger.info(f"Password reset email sent successfully to {user.email}")
+        logger.info(
+            "Password reset OTP email send_mail completed | task_id=%s user_id=%s to=%s sent_count=%s",
+            getattr(self.request, 'id', None),
+            user_id,
+            user.email,
+            sent_count,
+        )
         return True
 
     except User.DoesNotExist:
@@ -115,6 +149,6 @@ def send_password_reset_email_task(self, user_id, otp):
         return False
 
     except Exception as e:
-        logger.error(f"Failed to send password reset email to user {user_id}: {str(e)}")
+        logger.exception("Failed to send password reset OTP email | task_id=%s user_id=%s", getattr(self.request, 'id', None), user_id)
         # Retry the task
         raise self.retry(exc=e)

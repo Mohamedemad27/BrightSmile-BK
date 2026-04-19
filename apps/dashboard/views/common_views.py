@@ -58,9 +58,20 @@ class DashboardMeView(APIView):
 
     @staticmethod
     def _admin_permissions(user):
+        # Django superusers should always have full dashboard admin access.
+        if getattr(user, 'is_superuser', False):
+            from apps.users.permissions import ADMIN_PERMISSION_CODENAMES
+            return list(ADMIN_PERMISSION_CODENAMES)
+
         assignment = getattr(user, 'admin_role_assignment', None)
         if assignment is None:
-            return []
+            # Backward-compatible fallback for older admin accounts that
+            # may not have an AdminRoleAssignment yet.
+            group_perms = [
+                perm.split('.')[-1]
+                for perm in user.get_group_permissions()
+            ]
+            return group_perms
 
         # Super-admin (system role) gets a special marker so the
         # frontend knows this user has *all* permissions.

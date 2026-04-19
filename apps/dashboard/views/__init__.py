@@ -4,6 +4,7 @@ from .admin_views import (
     AdminUserDetailView,
     AdminDoctorListView,
     AdminDoctorApproveView,
+    AdminDoctorProfileUpdateView,
     AdminAppointmentListView,
     AdminReviewListView,
     AdminReviewDeleteView,
@@ -16,6 +17,8 @@ from .admin_views import (
     AdminRoleDetailView,
     AdminRoleAssignView,
     AdminRolePermissionsView,
+    AdminAuditListView,
+    AdminSyndicateSyncView,
 )
 from .doctor_views import (
     DoctorProfileView,

@@ -1,0 +1,234 @@
+{% extends "reports/base_report.html" %}
+
+{% block content %}
+<!-- ========================
+     SUMMARY
+     ======================== -->
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">S</span>
+        Patients Summary
+    </div>
+    <div class="summary-grid">
+        <div class="summary-card">
+            <div class="summary-card-value">{{ total_patients }}</div>
+            <div class="summary-card-label">Total Patients</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value success">{{ active_patients }}</div>
+            <div class="summary-card-label">Active</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value info">{{ verified_patients }}</div>
+            <div class="summary-card-label">Verified</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value warning">{{ new_this_month }}</div>
+            <div class="summary-card-label">New This Month</div>
+        </div>
+    </div>
+    <div class="summary-grid summary-grid-3">
+        <div class="summary-card">
+            <div class="summary-card-value">{{ total_appointments }}</div>
+            <div class="summary-card-label">Total Appointments</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value accent">{{ total_revenue }} EGP</div>
+            <div class="summary-card-label">Total Revenue</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value info">{{ total_ai_scans }}</div>
+            <div class="summary-card-label">Total AI Scans</div>
+        </div>
+    </div>
+</div>
+
+<!-- ========================
+     CHARTS
+     ======================== -->
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">C</span>
+        Visual Overview
+    </div>
+    <div class="chart-row">
+        <div class="chart-box">
+            <div class="chart-box-title">Patients by Status</div>
+            <div class="donut-chart-wrap">
+                <div class="section-subtitle text-center">Total: {{ total_patients }}</div>
+                {% if status_chart_segments %}
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th class="text-center">Count</th>
+                            <th class="text-center">Percent</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for seg in status_chart_segments %}
+                        <tr>
+                            <td class="text-bold">{{ seg.label }}</td>
+                            <td class="text-center text-bold">{{ seg.value }}</td>
+                            <td class="text-center">{{ seg.percentage }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="chart-box">
+            <div class="chart-box-title">Medical Conditions Prevalence</div>
+            <div class="hbar-chart">
+                {% for cond in conditions_chart %}
+                <div class="hbar-item">
+                    <span class="hbar-label">{{ cond.name }}</span>
+                    <div class="hbar-track">
+                        <div class="hbar-fill danger" style="width: {{ cond.bar_percent }}%;"></div>
+                    </div>
+                    <span class="hbar-value">{{ cond.percentage }}%</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if registration_chart %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">G</span>
+        Registration Trend
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Month</th>
+                <th class="text-center">New Patients</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in registration_chart %}
+            <tr>
+                <td>{{ m.label }}</td>
+                <td class="text-center text-bold">{{ m.new_patients }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ========================
+     PATIENTS LIST
+     ======================== -->
+<div class="section">
+    <div class="section-title">
+        <span class="section-title-icon">P</span>
+        Patients Directory
+    </div>
+
+    {% if patients %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Date of Birth</th>
+                <th class="text-center">Appointments</th>
+                <th class="text-center">AI Scans</th>
+                <th>Status</th>
+                <th>Joined</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in patients %}
+            <tr>
+                <td>{{ forloop.counter }}</td>
+                <td class="text-bold">{{ p.user.first_name }} {{ p.user.last_name }}</td>
+                <td>{{ p.user.email }}</td>
+                <td>{{ p.phone_number|default:"-" }}</td>
+                <td>{{ p.date_of_birth|default:"-" }}</td>
+                <td class="text-center">{{ p.appointment_count }}</td>
+                <td class="text-center">{{ p.ai_scan_count|default:"0" }}</td>
+                <td>
+                    <span class="badge {% if p.user.is_active %}badge-active{% else %}badge-inactive{% endif %}">
+                        {% if p.user.is_active %}Active{% else %}Inactive{% endif %}
+                    </span>
+                </td>
+                <td>{{ p.created_at|date:"M d, Y" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No patients found.</div>
+    {% endif %}
+</div>
+
+<!-- ========================
+     MEDICAL CONDITIONS OVERVIEW
+     ======================== -->
+{% if conditions_overview %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">M</span>
+        Medical Conditions Overview
+    </div>
+    <div class="section-subtitle">Aggregate medical history across all patients with recorded data</div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Condition</th>
+                <th class="text-center">Patients Affected</th>
+                <th class="text-center">Percentage</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for cond in conditions_overview %}
+            <tr>
+                <td class="text-bold">{{ cond.name }}</td>
+                <td class="text-center">{{ cond.count }}</td>
+                <td class="text-center">{{ cond.percentage }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ========================
+     REGISTRATION TREND
+     ======================== -->
+{% if registration_trend %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">G</span>
+        Registration Trend
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Month</th>
+                <th class="text-center">New Patients</th>
+                <th class="text-center">Cumulative Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for month in registration_trend %}
+            <tr>
+                <td>{{ month.label }}</td>
+                <td class="text-center text-bold">{{ month.new_patients }}</td>
+                <td class="text-center">{{ month.cumulative }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endblock %}

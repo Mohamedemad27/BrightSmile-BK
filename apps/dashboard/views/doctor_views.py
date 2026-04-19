@@ -3,16 +3,16 @@ from datetime import date
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.db import transaction
-from django.db.models import Count, Sum
+from django.db.models import Count, Max, Sum
 
 from rest_framework import status
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.models import Appointment, DoctorReview, DoctorService
 from apps.users.models import Secretary
-from apps.users.permissions import IsDoctor
+from apps.dashboard.permissions import DoctorPermission
+from apps.dashboard.services.doctor import DoctorServiceLayer
 from apps.dashboard.serializers.dashboard_serializers import (
     DoctorAppointmentSerializer,
     DoctorPatientSerializer,
@@ -23,6 +23,7 @@ from apps.dashboard.serializers.dashboard_serializers import (
     DoctorSecretaryUpdateSerializer,
     DoctorServiceSerializer,
 )
+from utils.pagination import StandardizedPagination
 
 User = get_user_model()
 
@@ -32,10 +33,8 @@ User = get_user_model()
 # ──────────────────────────────────────────────────────────────────────
 
 
-class StandardPagination(PageNumberPagination):
+class StandardPagination(StandardizedPagination):
     page_size = 20
-    page_size_query_param = 'page_size'
-    max_page_size = 100
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -46,15 +45,17 @@ class StandardPagination(PageNumberPagination):
 class DoctorProfileView(APIView):
     """Get or update the authenticated doctor's own profile."""
 
-    permission_classes = [IsDoctor]
+    permission_classes = [DoctorPermission]
 
     def get(self, request):
         doctor = request.user.doctor_profile
+        self.check_object_permissions(request, doctor)
         serializer = DoctorProfileSerializer(doctor)
         return Response(serializer.data)
 
     def patch(self, request):
         doctor = request.user.doctor_profile
+        self.check_object_permissions(request, doctor)
         serializer = DoctorProfileSerializer(doctor, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
@@ -69,7 +70,7 @@ class DoctorProfileView(APIView):
 class DoctorAppointmentListView(APIView):
     """List the authenticated doctor's appointments with optional filters."""
 
-    permission_classes = [IsDoctor]
+    permission_classes = [DoctorPermission]
 
     def get(self, request):
         doctor = request.user.doctor_profile
@@ -105,7 +106,7 @@ class DoctorAppointmentListView(APIView):
 class DoctorAppointmentStatusView(APIView):
     """Update the status of an appointment belonging to this doctor."""
 
-    permission_classes = [IsDoctor]
+    permission_classes = [DoctorPermission]
 
     VALID_TRANSITIONS = {
         'pending': ['confirmed', 'rejected'],
@@ -115,18 +116,16 @@ class DoctorAppointmentStatusView(APIView):
     def patch(self, request, pk):
         doctor = request.user.doctor_profile
 
-        try:
-            appointment = (
-                Appointment.objects
-                .select_related('doctor__user', 'patient')
-                .prefetch_related('services')
-                .get(id=pk, doctor=doctor)
-            )
-        except Appointment.DoesNotExist:
+        appointment = DoctorServiceLayer.get_appointment_for_doctor(
+            appointment_id=pk,
+            doctor=doctor,
+        )
+        if appointment is None:
             return Response(
                 {'detail': 'Appointment not found.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        self.check_object_permissions(request, appointment)
 
         new_status = request.data.get('status')
         if not new_status:
@@ -135,15 +134,15 @@ class DoctorAppointmentStatusView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        allowed = self.VALID_TRANSITIONS.get(appointment.status, [])
-        if new_status not in allowed:
+        ok, error = DoctorServiceLayer.update_appointment_status(
+            appointment=appointment,
+            new_status=new_status,
+        )
+        if not ok:
             return Response(
-                {'detail': f'Cannot change from {appointment.status} to {new_status}.'},
+                {'detail': error},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        appointment.status = new_status
-        appointment.save(update_fields=['status', 'updated_at'])
 
         serializer = DoctorAppointmentSerializer(appointment)
         return Response(serializer.data)
@@ -157,7 +156,7 @@ class DoctorAppointmentStatusView(APIView):
 class DoctorPatientListView(APIView):
     """List unique patients who have booked with this doctor."""
 
-    permission_classes = [IsDoctor]
+    permission_classes = [DoctorPermission]
 
     def get(self, request):
         doctor = request.user.doctor_profile
@@ -169,8 +168,9 @@ class DoctorPatientListView(APIView):
             )
             .annotate(
                 total_appointments=Count('appointments_as_patient', distinct=True),
+                last_appointment_date=Max('appointments_as_patient__date'),
             )
-            .order_by('-appointments_as_patient__date')
+            .order_by('-last_appointment_date')
             .distinct()
         )
 
@@ -188,7 +188,7 @@ class DoctorPatientListView(APIView):
 class DoctorServiceListCreateView(APIView):
     """List and create services for the authenticated doctor."""
 
-    permission_classes = [IsDoctor]
+    permission_classes = [DoctorPermission]
 
     def get(self, request):
         doctor = request.user.doctor_profile
@@ -210,7 +210,7 @@ class DoctorServiceListCreateView(APIView):
 class DoctorServiceDetailView(APIView):
     """Update or delete a service belonging to this doctor."""
 
-    permission_classes = [IsDoctor]
+    permission_classes = [DoctorPermission]
 
     def _get_service(self, request, pk):
         doctor = request.user.doctor_profile
@@ -226,6 +226,7 @@ class DoctorServiceDetailView(APIView):
                 {'detail': 'Service not found.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        self.check_object_permissions(request, service)
 
         serializer = DoctorServiceSerializer(service, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -239,6 +240,7 @@ class DoctorServiceDetailView(APIView):
                 {'detail': 'Service not found.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        self.check_object_permissions(request, service)
 
         service.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -252,7 +254,7 @@ class DoctorServiceDetailView(APIView):
 class DoctorSecretaryListCreateView(APIView):
     """List and create secretaries for the authenticated doctor."""
 
-    permission_classes = [IsDoctor]
+    permission_classes = [DoctorPermission]
 
     def get(self, request):
         doctor = request.user.doctor_profile
@@ -291,7 +293,7 @@ class DoctorSecretaryListCreateView(APIView):
 class DoctorSecretaryDetailView(APIView):
     """Update or deactivate a secretary belonging to this doctor."""
 
-    permission_classes = [IsDoctor]
+    permission_classes = [DoctorPermission]
 
     def _get_secretary(self, request, pk):
         doctor = request.user.doctor_profile
@@ -310,6 +312,7 @@ class DoctorSecretaryDetailView(APIView):
                 {'detail': 'Secretary not found.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        self.check_object_permissions(request, secretary)
 
         serializer = DoctorSecretaryUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -330,6 +333,7 @@ class DoctorSecretaryDetailView(APIView):
                 {'detail': 'Secretary not found.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        self.check_object_permissions(request, secretary)
 
         # Deactivate rather than hard-delete
         secretary.is_active = False
@@ -352,7 +356,7 @@ class DoctorSecretaryDetailView(APIView):
 class DoctorReviewListView(APIView):
     """List all reviews for the authenticated doctor."""
 
-    permission_classes = [IsDoctor]
+    permission_classes = [DoctorPermission]
 
     def get(self, request):
         doctor = request.user.doctor_profile
@@ -377,7 +381,7 @@ class DoctorReviewListView(APIView):
 class DoctorAnalyticsView(APIView):
     """Return analytics and stats for the authenticated doctor."""
 
-    permission_classes = [IsDoctor]
+    permission_classes = [DoctorPermission]
 
     def get(self, request):
         doctor = request.user.doctor_profile

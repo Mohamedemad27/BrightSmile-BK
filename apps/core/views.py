@@ -26,6 +26,7 @@ from .serializers import (
     AppointmentListSerializer,
     AppointmentStatusUpdateSerializer,
     DoctorDetailSerializer,
+    DoctorServiceSerializer,
     FavoriteDoctorSerializer,
     HealthCheckSerializer,
     HealthTipSerializer,
@@ -130,46 +131,20 @@ class HealthCheckView(APIView):
         tags=['Health Check']
     )
     def get(self, request):
-        """
-        Perform health check on all services.
-        """
-        services_status = []
-        overall_status = 'healthy'
+        db_status = self._check_database()['status']
+        redis_status = self._check_redis()['status']
 
-        # Check Database
-        db_status = self._check_database()
-        services_status.append(db_status)
-        if db_status['status'] == 'unhealthy':
-            overall_status = 'unhealthy'
+        db_connected = 'connected' if db_status == 'healthy' else 'disconnected'
+        redis_connected = 'connected' if redis_status == 'healthy' else 'disconnected'
+        overall = 'ok' if db_connected == 'connected' and redis_connected == 'connected' else 'degraded'
 
-        # Check Redis
-        redis_status = self._check_redis()
-        services_status.append(redis_status)
-        if redis_status['status'] == 'unhealthy' and overall_status != 'unhealthy':
-            overall_status = 'degraded'
-
-        # Application status
-        app_status = {
-            'service': 'application',
-            'status': 'healthy',
-            'response_time': 0.5,
-            'details': f'Django {self._get_django_version()}'
+        payload = {
+            'status': overall,
+            'db': db_connected,
+            'redis': redis_connected,
         }
-        services_status.append(app_status)
-
-        # Prepare response
-        response_data = {
-            'status': overall_status,
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'version': getattr(settings, 'APP_VERSION', '1.0.0'),
-            'environment': getattr(settings, 'ENVIRONMENT', 'dev'),
-            'services': services_status
-        }
-
-        # Return appropriate HTTP status code
-        http_status = status.HTTP_200_OK if overall_status != 'unhealthy' else status.HTTP_503_SERVICE_UNAVAILABLE
-
-        return Response(response_data, status=http_status)
+        http_status = status.HTTP_200_OK if overall == 'ok' else status.HTTP_503_SERVICE_UNAVAILABLE
+        return Response(payload, status=http_status)
 
     def _check_database(self):
         """
@@ -407,7 +382,12 @@ class DoctorsByCategoryView(APIView):
     )
     def get(self, request):
         category_id = request.query_params.get('category')
-        cache_key = f'doctors_by_cat:{category_id or "all"}'
+        limit = request.query_params.get('limit', 50)
+        try:
+            limit = max(1, min(int(limit), 200))
+        except (TypeError, ValueError):
+            limit = 50
+        cache_key = f'doctors_by_cat:{category_id or "all"}:{limit}'
 
         cached = cache.get(cache_key)
         if cached:
@@ -424,7 +404,7 @@ class DoctorsByCategoryView(APIView):
         if category_id:
             doctors = doctors.filter(categories__id=category_id)
 
-        data = TopDoctorSerializer(doctors, many=True).data
+        data = TopDoctorSerializer(doctors[:limit], many=True).data
         cache.set(cache_key, json.dumps(data, default=str), timeout=3600)
 
         return Response(data)
@@ -472,6 +452,40 @@ class DoctorDetailView(APIView):
         return Response(data)
 
 
+class DoctorServicesView(APIView):
+    """Returns active services for a doctor."""
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_id='doctor_services',
+        operation_summary='List doctor services',
+        operation_description='Returns all services offered by a doctor by doctor user UUID.',
+        responses={
+            200: DoctorServiceSerializer(many=True),
+            404: 'Doctor not found',
+        },
+        tags=['Doctors'],
+    )
+    def get(self, request, doctor_id):
+        doctor_exists = Doctor.objects.filter(user__id=doctor_id, user__is_active=True).exists()
+        if not doctor_exists:
+            return Response(
+                {'detail': 'Doctor not found.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        limit = request.query_params.get('limit', 100)
+        try:
+            limit = max(1, min(int(limit), 300))
+        except (TypeError, ValueError):
+            limit = 100
+
+        services = DoctorService.objects.filter(doctor__user__id=doctor_id).order_by('name')[:limit]
+        data = DoctorServiceSerializer(services, many=True).data
+        return Response(data)
+
+
 # ─── Appointment Views ───
 
 
@@ -494,7 +508,18 @@ class AppointmentListCreateView(APIView):
         else:
             qs = Appointment.objects.filter(patient=user)
 
-        qs = qs.select_related('doctor__user', 'patient').prefetch_related('services')
+        # Keep response bounded for scalability in legacy endpoint.
+        limit = request.query_params.get('limit', 50)
+        try:
+            limit = max(1, min(int(limit), 200))
+        except (TypeError, ValueError):
+            limit = 50
+
+        qs = (
+            qs.select_related('doctor__user', 'patient')
+            .prefetch_related('services')
+            .order_by('-date', '-created_at')[:limit]
+        )
         data = AppointmentListSerializer(qs, many=True).data
         return Response(data)
 

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 120" fill="none">
+  <!-- "smilix" text in a friendly rounded style -->
+  <text x="200" y="65" text-anchor="middle" font-family="'Comfortaa', 'Nunito', 'Rounded Mplus 1c', sans-serif" font-size="72" font-weight="700" fill="#2563eb" letter-spacing="-1">
+    smilix
+  </text>
+  <!-- Smile curve underneath -->
+  <path d="M70 80 Q80 68 95 75 Q200 120 305 75 Q320 68 330 80" stroke="#2563eb" stroke-width="5" stroke-linecap="round" fill="none"/>
+</svg>

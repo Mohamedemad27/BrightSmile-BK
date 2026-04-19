@@ -1,0 +1,362 @@
+{% extends "reports/base_report.html" %}
+
+{% block content %}
+<!-- ========================
+     SUMMARY
+     ======================== -->
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">S</span>
+        Appointments Summary
+    </div>
+    <div class="summary-grid">
+        <div class="summary-card">
+            <div class="summary-card-value">{{ total_appointments }}</div>
+            <div class="summary-card-label">Total Appointments</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value success">{{ completed_count }}</div>
+            <div class="summary-card-label">Completed</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value warning">{{ pending_count }}</div>
+            <div class="summary-card-label">Pending</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value danger">{{ cancelled_count }}</div>
+            <div class="summary-card-label">Cancelled</div>
+        </div>
+    </div>
+    <div class="summary-grid summary-grid-3">
+        <div class="summary-card">
+            <div class="summary-card-value info">{{ confirmed_count }}</div>
+            <div class="summary-card-label">Confirmed</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value danger">{{ rejected_count }}</div>
+            <div class="summary-card-label">Rejected</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value accent">{{ total_revenue }} EGP</div>
+            <div class="summary-card-label">Total Revenue</div>
+        </div>
+    </div>
+</div>
+
+<!-- ========================
+     STATUS BREAKDOWN
+     ======================== -->
+{% if status_breakdown %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">B</span>
+        Status Distribution
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Status</th>
+                <th class="text-center">Count</th>
+                <th class="text-center">Percentage</th>
+                <th class="text-right">Revenue</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in status_breakdown %}
+            <tr>
+                <td><span class="badge badge-{{ item.status }}">{{ item.status }}</span></td>
+                <td class="text-center text-bold">{{ item.count }}</td>
+                <td class="text-center">{{ item.percentage }}%</td>
+                <td class="text-right">{{ item.revenue }} EGP</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ========================
+     CHARTS
+     ======================== -->
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">C</span>
+        Visual Overview
+    </div>
+    <div class="chart-row">
+        <!-- Donut: Status Distribution -->
+        <div class="chart-box">
+            <div class="chart-box-title">Status Distribution</div>
+            <div class="donut-chart-wrap">
+                <svg class="donut-svg" viewBox="0 0 160 160">
+                    <circle cx="80" cy="80" r="60" stroke="var(--bg-muted)" stroke-width="28" fill="none"/>
+                    {% for seg in status_chart_segments %}
+                    <circle cx="80" cy="80" r="60" class="stroke-{{ seg.color_idx }}"
+                            stroke-width="28" fill="none"
+                            stroke-dasharray="{{ seg.dash }} 376.99"
+                            stroke-dashoffset="-{{ seg.offset }}"
+                            style="transform: rotate(-90deg); transform-origin: 50% 50%;"/>
+                    {% endfor %}
+                    <text x="80" y="76" class="donut-center-label">{{ total_appointments }}</text>
+                    <text x="80" y="94" class="donut-center-sub">total</text>
+                </svg>
+                <ul class="chart-legend">
+                    {% for seg in status_chart_segments %}
+                    <li>
+                        <span class="legend-dot dot-{{ seg.color_idx }}"></span>
+                        <span class="legend-label">{{ seg.label }}</span>
+                        <span class="legend-value">{{ seg.value }} ({{ seg.percentage }}%)</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <!-- Top Doctors Bar Chart -->
+        <div class="chart-box">
+            <div class="chart-box-title">Top Doctors by Appointments</div>
+            <div class="hbar-chart">
+                {% for d in doctors_chart %}
+                <div class="hbar-item">
+                    <span class="hbar-label">Dr. {{ d.name|truncatewords:2 }}</span>
+                    <div class="hbar-track">
+                        <div class="hbar-fill primary" style="width: {{ d.bar_percent }}%;"></div>
+                    </div>
+                    <span class="hbar-value">{{ d.count }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Monthly Trend Chart -->
+{% if monthly_chart %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">T</span>
+        Monthly Appointments Trend
+    </div>
+    <div class="vbar-chart">
+        {% for m in monthly_chart %}
+        <div class="vbar-col">
+            <span class="vbar-val">{{ m.total }}</span>
+            <div class="vbar-fill primary" style="height: {{ m.bar_percent }}%;"></div>
+        </div>
+        {% endfor %}
+    </div>
+    <div class="vbar-labels">
+        {% for m in monthly_chart %}
+        <span class="vbar-lbl">{{ m.label }}</span>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Revenue Trend Chart -->
+{% if revenue_chart %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">$</span>
+        Monthly Revenue Trend
+    </div>
+    <div class="vbar-chart">
+        {% for m in revenue_chart %}
+        <div class="vbar-col">
+            <span class="vbar-val">{{ m.revenue }}</span>
+            <div class="vbar-fill success" style="height: {{ m.bar_percent }}%;"></div>
+        </div>
+        {% endfor %}
+    </div>
+    <div class="vbar-labels">
+        {% for m in revenue_chart %}
+        <span class="vbar-lbl">{{ m.label }}</span>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Services Popularity Chart -->
+{% if services_chart %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">V</span>
+        Most Popular Services
+    </div>
+    <div class="hbar-chart">
+        {% for svc in services_chart %}
+        <div class="hbar-item">
+            <span class="hbar-label">{{ svc.name|truncatewords:3 }}</span>
+            <div class="hbar-track">
+                <div class="hbar-fill accent" style="width: {{ svc.bar_percent }}%;"></div>
+            </div>
+            <span class="hbar-value">{{ svc.count }} bookings</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- ========================
+     TOP DOCTORS BY APPOINTMENTS
+     ======================== -->
+{% if top_doctors %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">T</span>
+        Top Doctors by Appointments
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Doctor</th>
+                <th>Specialty</th>
+                <th class="text-center">Appointments</th>
+                <th class="text-center">Completed</th>
+                <th class="text-center">Completion Rate</th>
+                <th class="text-right">Revenue</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for doc in top_doctors %}
+            <tr>
+                <td class="text-bold text-primary">#{{ forloop.counter }}</td>
+                <td class="text-bold">Dr. {{ doc.name }}</td>
+                <td>{{ doc.specialty }}</td>
+                <td class="text-center">{{ doc.total }}</td>
+                <td class="text-center">{{ doc.completed }}</td>
+                <td class="text-center">{{ doc.completion_rate }}%</td>
+                <td class="text-right">{{ doc.revenue }} EGP</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ========================
+     APPOINTMENTS LIST
+     ======================== -->
+<div class="section">
+    <div class="section-title">
+        <span class="section-title-icon">A</span>
+        All Appointments
+    </div>
+    {% if report_period %}
+    <div class="section-subtitle">Period: {{ report_period }}</div>
+    {% endif %}
+
+    {% if appointments %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Patient</th>
+                <th>Doctor</th>
+                <th>Services</th>
+                <th>Status</th>
+                <th class="text-right">Price</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for appt in appointments %}
+            <tr>
+                <td>{{ forloop.counter }}</td>
+                <td>{{ appt.date }}</td>
+                <td>{{ appt.time_slot }}</td>
+                <td>{{ appt.patient.first_name }} {{ appt.patient.last_name }}</td>
+                <td class="text-bold">Dr. {{ appt.doctor.user.first_name }} {{ appt.doctor.user.last_name }}</td>
+                <td>
+                    {% for svc in appt.services.all %}
+                        {{ svc.name }}{% if not forloop.last %}, {% endif %}
+                    {% endfor %}
+                </td>
+                <td>
+                    <span class="badge badge-{{ appt.status }}">{{ appt.status }}</span>
+                </td>
+                <td class="text-right">{{ appt.total_price }} EGP</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No appointments found for the selected period.</div>
+    {% endif %}
+</div>
+
+<!-- ========================
+     MONTHLY TREND
+     ======================== -->
+{% if monthly_trend %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">M</span>
+        Monthly Appointments Trend
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Month</th>
+                <th class="text-center">Total</th>
+                <th class="text-center">Completed</th>
+                <th class="text-center">Cancelled</th>
+                <th class="text-center">Completion Rate</th>
+                <th class="text-right">Revenue</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for month in monthly_trend %}
+            <tr>
+                <td>{{ month.label }}</td>
+                <td class="text-center text-bold">{{ month.total }}</td>
+                <td class="text-center text-success">{{ month.completed }}</td>
+                <td class="text-center text-danger">{{ month.cancelled }}</td>
+                <td class="text-center">{{ month.completion_rate }}%</td>
+                <td class="text-right">{{ month.revenue }} EGP</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ========================
+     SERVICES POPULARITY
+     ======================== -->
+{% if popular_services %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">V</span>
+        Most Popular Services
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Service</th>
+                <th>Doctor</th>
+                <th class="text-center">Times Booked</th>
+                <th class="text-right">Unit Price</th>
+                <th class="text-right">Total Revenue</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for svc in popular_services %}
+            <tr>
+                <td class="text-bold text-primary">#{{ forloop.counter }}</td>
+                <td class="text-bold">{{ svc.name }}</td>
+                <td>Dr. {{ svc.doctor_name }}</td>
+                <td class="text-center">{{ svc.count }}</td>
+                <td class="text-right">{{ svc.price }} EGP</td>
+                <td class="text-right">{{ svc.total_revenue }} EGP</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endblock %}

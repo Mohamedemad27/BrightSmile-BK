@@ -1,17 +1,17 @@
 from django.db.models import Count
 
 from rest_framework import status
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.models import Appointment
-from apps.users.permissions import IsSecretary
+from apps.dashboard.permissions import SecretaryPermission
 from apps.dashboard.serializers.dashboard_serializers import (
     DoctorAppointmentSerializer,
     DoctorPatientSerializer,
     SecretaryDoctorSerializer,
 )
+from utils.pagination import StandardizedPagination
 
 from django.contrib.auth import get_user_model
 
@@ -23,10 +23,8 @@ User = get_user_model()
 # ──────────────────────────────────────────────────────────────────────
 
 
-class StandardPagination(PageNumberPagination):
+class StandardPagination(StandardizedPagination):
     page_size = 20
-    page_size_query_param = 'page_size'
-    max_page_size = 100
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -37,10 +35,11 @@ class StandardPagination(PageNumberPagination):
 class SecretaryDoctorView(APIView):
     """Get the assigned doctor's profile (read-only)."""
 
-    permission_classes = [IsSecretary]
+    permission_classes = [SecretaryPermission]
 
     def get(self, request):
         doctor = request.user.secretary_profile.doctor
+        self.check_object_permissions(request, doctor)
         serializer = SecretaryDoctorSerializer(doctor)
         return Response(serializer.data)
 
@@ -53,7 +52,7 @@ class SecretaryDoctorView(APIView):
 class SecretaryAppointmentListView(APIView):
     """List appointments for the secretary's assigned doctor."""
 
-    permission_classes = [IsSecretary]
+    permission_classes = [SecretaryPermission]
 
     def get(self, request):
         doctor = request.user.secretary_profile.doctor
@@ -89,7 +88,7 @@ class SecretaryAppointmentListView(APIView):
 class SecretaryAppointmentStatusView(APIView):
     """Update appointment status on behalf of the assigned doctor."""
 
-    permission_classes = [IsSecretary]
+    permission_classes = [SecretaryPermission]
 
     VALID_TRANSITIONS = {
         'pending': ['confirmed', 'rejected'],
@@ -111,6 +110,7 @@ class SecretaryAppointmentStatusView(APIView):
                 {'detail': 'Appointment not found.'},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        self.check_object_permissions(request, appointment)
 
         new_status = request.data.get('status')
         if not new_status:
@@ -141,7 +141,7 @@ class SecretaryAppointmentStatusView(APIView):
 class SecretaryPatientListView(APIView):
     """List unique patients for the secretary's assigned doctor."""
 
-    permission_classes = [IsSecretary]
+    permission_classes = [SecretaryPermission]
 
     def get(self, request):
         doctor = request.user.secretary_profile.doctor

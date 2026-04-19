@@ -1,0 +1,479 @@
+{% extends "reports/base_report.html" %}
+
+{% block extra_styles %}
+<style>
+    .severity-high { color: #dc2626; font-weight: 600; }
+    .severity-medium { color: #d97706; font-weight: 600; }
+    .severity-low { color: #059669; font-weight: 600; }
+
+    .audit-category {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 8pt;
+        font-weight: 500;
+    }
+    .audit-category-auth {
+        background: #ede9fe;
+        color: #7c3aed;
+    }
+    .audit-category-user {
+        background: #dbeafe;
+        color: #2563eb;
+    }
+    .audit-category-appointment {
+        background: #cffafe;
+        color: #0891b2;
+    }
+    .audit-category-review {
+        background: #fef3c7;
+        color: #e8862a;
+    }
+    .audit-category-admin {
+        background: #fee2e2;
+        color: #dc2626;
+    }
+    .audit-category-system {
+        background: #f3f4f6;
+        color: #6b7280;
+    }
+    .audit-category-security {
+        background: #fce7f3;
+        color: #be185d;
+    }
+
+    /* PDF readability tweaks (xhtml2pdf) */
+    .audit-table {
+        table-layout: fixed;
+    }
+
+    .audit-table th,
+    .audit-table td {
+        word-wrap: break-word;
+        white-space: normal;
+    }
+
+    .audit-small td {
+        font-size: 8pt;
+    }
+
+    .role-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 8pt;
+        font-weight: 600;
+        text-transform: capitalize;
+        white-space: nowrap;
+        background: #f3f4f6;
+        color: #6b7280;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- ========================
+     SUMMARY
+     ======================== -->
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">S</span>
+        Audit Summary
+    </div>
+    <div class="summary-grid">
+        <div class="summary-card">
+            <div class="summary-card-value">{{ total_events }}</div>
+            <div class="summary-card-label">Total Events</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value info">{{ unique_users }}</div>
+            <div class="summary-card-label">Unique Users</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value warning">{{ security_events }}</div>
+            <div class="summary-card-label">Security Events</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value danger">{{ failed_events }}</div>
+            <div class="summary-card-label">Failed Actions</div>
+        </div>
+    </div>
+</div>
+
+<!-- ========================
+     CHARTS
+     ======================== -->
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">C</span>
+        Visual Overview
+    </div>
+    <div class="chart-row">
+        <div class="chart-box">
+            <div class="chart-box-title">Events by Category</div>
+            <div class="donut-chart-wrap">
+                <div class="section-subtitle text-center">Total: {{ total_events }}</div>
+                {% if category_chart_segments %}
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th class="text-center">Count</th>
+                            <th class="text-center">Percent</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for seg in category_chart_segments %}
+                        <tr>
+                            <td class="text-bold">{{ seg.label }}</td>
+                            <td class="text-center text-bold">{{ seg.value }}</td>
+                            <td class="text-center">{{ seg.percentage }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="chart-box">
+            <div class="chart-box-title">Top Actions</div>
+            {% if top_actions_chart %}
+            <table class="data-table audit-table audit-small">
+                <thead>
+                    <tr>
+                        <th>Action</th>
+                        <th class="text-center">Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in top_actions_chart %}
+                    <tr>
+                        <td><span class="audit-action">{{ a.name }}</span></td>
+                        <td class="text-center text-bold">{{ a.count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">No actions found.</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% if daily_activity_chart %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">T</span>
+        Daily Activity Trend
+    </div>
+    <table class="data-table audit-table audit-small">
+        <thead>
+            <tr>
+                <th>Day</th>
+                <th class="text-center">Events</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in daily_activity_chart %}
+            <tr>
+                <td>{{ d.label }}</td>
+                <td class="text-center text-bold">{{ d.count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- Most Active Users Chart -->
+{% if active_users_chart %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">U</span>
+        Most Active Users
+    </div>
+    <table class="data-table audit-table audit-small">
+        <thead>
+            <tr>
+                <th>User</th>
+                <th class="text-center">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for u in active_users_chart %}
+            <tr>
+                <td class="text-bold">{{ u.name }}</td>
+                <td class="text-center text-bold">{{ u.actions }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- Security vs Normal Stacked Bar -->
+{% if security_ratio %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">!</span>
+        Security Events Ratio
+    </div>
+    <table class="stacked-bar-table">
+        <tr>
+            <td class="stacked-segment" style="width: {{ security_ratio.normal_pct }}%; background: #2563eb;"></td>
+            <td class="stacked-segment" style="width: {{ security_ratio.security_pct }}%; background: #d97706;"></td>
+            <td class="stacked-segment" style="width: {{ security_ratio.failed_pct }}%; background: #dc2626;"></td>
+        </tr>
+    </table>
+    <table class="data-table" style="margin-top: 8px;">
+        <tbody>
+            <tr>
+                <td><span class="legend-dot dot-1" style="display:inline-block;vertical-align:middle;margin-right:6px;"></span>Normal</td>
+                <td class="text-right">{{ security_ratio.normal_pct }}%</td>
+            </tr>
+            <tr>
+                <td><span class="legend-dot dot-3" style="display:inline-block;vertical-align:middle;margin-right:6px;"></span>Security</td>
+                <td class="text-right">{{ security_ratio.security_pct }}%</td>
+            </tr>
+            <tr>
+                <td><span class="legend-dot dot-4" style="display:inline-block;vertical-align:middle;margin-right:6px;"></span>Failed</td>
+                <td class="text-right">{{ security_ratio.failed_pct }}%</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ========================
+     ACTIVITY BY ACTION TYPE
+     ======================== -->
+{% if action_breakdown %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">A</span>
+        Activity by Action Type
+    </div>
+    <table class="data-table audit-table audit-small">
+        <thead>
+            <tr>
+                <th>Action</th>
+                <th>Category</th>
+                <th class="text-center">Count</th>
+                <th class="text-center">Percentage</th>
+                <th class="text-center">Unique Users</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for action in action_breakdown %}
+            <tr>
+                <td><span class="audit-action">{{ action.name }}</span></td>
+                <td>
+                    <span class="audit-category audit-category-{{ action.category }}">{{ action.category }}</span>
+                </td>
+                <td class="text-center text-bold">{{ action.count }}</td>
+                <td class="text-center">{{ action.percentage }}%</td>
+                <td class="text-center">{{ action.unique_users }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ========================
+     SECURITY EVENTS
+     ======================== -->
+{% if security_logs %}
+<div class="section">
+    <div class="section-title">
+        <span class="section-title-icon">!</span>
+        Security Events
+    </div>
+    <div class="section-subtitle">Login attempts, 2FA changes, password resets, and account modifications</div>
+    <table class="data-table audit-table audit-small">
+        <thead>
+            <tr>
+                <th>Timestamp</th>
+                <th>User</th>
+                <th>Action</th>
+                <th>Description</th>
+                <th>IP Address</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in security_logs %}
+            <tr>
+                <td class="text-small">{{ log.created_at|date:"M d, Y H:i" }}</td>
+                <td>{{ log.user.first_name }} {{ log.user.last_name|default:"System" }}</td>
+                <td><span class="audit-action">{{ log.action }}</span></td>
+                <td class="text-small">{{ log.description|truncatewords:15 }}</td>
+                <td class="text-small">{{ log.ip_address|default:"-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ========================
+     USER MANAGEMENT EVENTS
+     ======================== -->
+{% if user_management_logs %}
+<div class="section">
+    <div class="section-title">
+        <span class="section-title-icon">U</span>
+        User Management Events
+    </div>
+    <div class="section-subtitle">User creation, activation, deactivation, role assignments, and doctor approvals</div>
+    <table class="data-table audit-table audit-small">
+        <thead>
+            <tr>
+                <th>Timestamp</th>
+                <th>Performed By</th>
+                <th>Action</th>
+                <th>Target</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in user_management_logs %}
+            <tr>
+                <td class="text-small">{{ log.created_at|date:"M d, Y H:i" }}</td>
+                <td>{{ log.user.first_name|default:"System" }} {{ log.user.last_name|default:"" }}</td>
+                <td><span class="audit-action">{{ log.action }}</span></td>
+                <td class="text-small">{{ log.target_type }} #{{ log.target_id|truncatechars:8 }}</td>
+                <td class="text-small">{{ log.description|truncatewords:12 }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ========================
+     APPOINTMENT EVENTS
+     ======================== -->
+{% if appointment_logs %}
+<div class="section">
+    <div class="section-title">
+        <span class="section-title-icon">C</span>
+        Appointment Events
+    </div>
+    <table class="data-table audit-table audit-small">
+        <thead>
+            <tr>
+                <th>Timestamp</th>
+                <th>User</th>
+                <th>Action</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in appointment_logs %}
+            <tr>
+                <td class="text-small">{{ log.created_at|date:"M d, Y H:i" }}</td>
+                <td>{{ log.user.first_name|default:"System" }} {{ log.user.last_name|default:"" }}</td>
+                <td><span class="audit-action">{{ log.action }}</span></td>
+                <td class="text-small">{{ log.description|truncatewords:15 }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ========================
+     FULL AUDIT LOG
+     ======================== -->
+<div class="section page-break">
+    <div class="section-title">
+        <span class="section-title-icon">L</span>
+        Complete Audit Log
+    </div>
+    {% if report_period %}
+    <div class="section-subtitle">Period: {{ report_period }}</div>
+    {% endif %}
+
+    {% if audit_logs %}
+    <table class="data-table audit-table audit-small">
+        <thead>
+            <tr>
+                <th style="width: 16%;">Timestamp</th>
+                <th style="width: 14%;">User</th>
+                <th style="width: 22%;">Action</th>
+                <th style="width: 12%;">Target</th>
+                <th style="width: 26%;">Description</th>
+                <th style="width: 10%;">IP</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in audit_logs %}
+            <tr>
+                <td class="text-small" style="white-space: nowrap;">{{ log.created_at|date:"M d, Y H:i:s" }}</td>
+                <td class="text-small">
+                    {% if log.user %}
+                        {{ log.user.first_name }} {{ log.user.last_name }}
+                    {% else %}
+                        <span class="text-muted">System</span>
+                    {% endif %}
+                </td>
+                <td><span class="audit-action">{{ log.action }}</span></td>
+                <td class="text-small">
+                    {% if log.target_type %}
+                        {{ log.target_type }}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
+                <td class="text-small">{{ log.description|truncatewords:12 }}</td>
+                <td class="text-small">{{ log.ip_address|default:"-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No audit logs found for the selected period.</div>
+    {% endif %}
+</div>
+
+<!-- ========================
+     MOST ACTIVE USERS
+     ======================== -->
+{% if most_active_users %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">R</span>
+        Most Active Users
+    </div>
+    <table class="data-table audit-table audit-small">
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>User</th>
+                <th>Role</th>
+                <th class="text-center">Total Actions</th>
+                <th>Most Common Action</th>
+                <th>Last Activity</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in most_active_users %}
+            <tr>
+                <td class="text-bold text-primary">#{{ forloop.counter }}</td>
+                <td class="text-bold">{{ user.name }}</td>
+                <td>
+                    <span class="role-badge">{{ user.role }}</span>
+                </td>
+                <td class="text-center text-bold">{{ user.total_actions }}</td>
+                <td><span class="audit-action">{{ user.most_common_action }}</span></td>
+                <td class="text-small">{{ user.last_activity|date:"M d, Y H:i" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endblock %}

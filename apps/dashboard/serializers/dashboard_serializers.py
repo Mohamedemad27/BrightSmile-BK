@@ -10,6 +10,7 @@ from apps.core.models import (
     HealthTip,
     ServiceCategory,
 )
+from apps.dashboard.models import AuditLog
 from apps.users.models import (
     AdminRole,
     AdminRoleAssignment,
@@ -240,9 +241,74 @@ class AdminDoctorListSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class AdminDoctorProfileUpdateSerializer(serializers.ModelSerializer):
+    """Admin-only patch serializer for doctor profile data."""
+
+    class Meta:
+        model = Doctor
+        fields = [
+            'phone_number',
+            'specialty',
+            'profile_image_url',
+            'bio',
+            'location',
+            'working_hours',
+            'facebook_url',
+            'instagram_url',
+            'twitter_url',
+            'linkedin_url',
+            'categories',
+        ]
+
+
+class AdminAuditEntrySerializer(serializers.ModelSerializer):
+    user_email = serializers.EmailField(source='user.email', allow_null=True, read_only=True)
+    user_name = serializers.SerializerMethodField()
+    action_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuditLog
+        fields = [
+            'id',
+            'user_email',
+            'user_name',
+            'action',
+            'action_display',
+            'target_type',
+            'target_id',
+            'description',
+            'ip_address',
+            'metadata',
+            'created_at',
+        ]
+        read_only_fields = fields
+
+    def get_user_name(self, obj):
+        if not obj.user:
+            return 'System'
+        first = obj.user.first_name or ''
+        last = obj.user.last_name or ''
+        return f'{first} {last}'.strip() or obj.user.email
+
+    def get_action_display(self, obj):
+        return (obj.action or '').replace('_', ' ').title()
+
+
+class SyndicateDoctorPayloadSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    license_status = serializers.CharField(required=False, allow_blank=True)
+    specialty = serializers.CharField(required=False, allow_blank=True)
+    location = serializers.CharField(required=False, allow_blank=True)
+
 # ═══════════════════════════════════════════════════════════════════════
 # Admin – Appointments
 # ═══════════════════════════════════════════════════════════════════════
+
+
+class AdminAppointmentServiceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DoctorService
+        fields = ['id', 'name', 'price']
 
 
 class AdminAppointmentListSerializer(serializers.ModelSerializer):
@@ -252,6 +318,7 @@ class AdminAppointmentListSerializer(serializers.ModelSerializer):
     patient_email = serializers.EmailField(source='patient.email', read_only=True)
     doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
     doctor_id = serializers.UUIDField(source='doctor.user_id', read_only=True)
+    services = AdminAppointmentServiceSerializer(many=True, read_only=True)
 
     class Meta:
         model = Appointment
@@ -266,6 +333,7 @@ class AdminAppointmentListSerializer(serializers.ModelSerializer):
             'status',
             'total_price',
             'notes',
+            'services',
             'created_at',
         ]
         read_only_fields = fields
@@ -546,6 +614,19 @@ class DoctorServiceSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         # The view is responsible for injecting `doctor` into validated_data
         return super().create(validated_data)
+
+    def validate_name(self, value):
+        name = value.strip()
+        if not name:
+            raise serializers.ValidationError('Service name is required.')
+        return name
+
+    def validate_price(self, value):
+        if value is None:
+            raise serializers.ValidationError('Price is required.')
+        if value <= 0:
+            raise serializers.ValidationError('Price must be greater than 0.')
+        return value
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -1,0 +1,244 @@
+{% extends "reports/base_report.html" %}
+
+{% block content %}
+<!-- ========================
+     SUMMARY
+     ======================== -->
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">S</span>
+        Doctors Summary
+    </div>
+    <div class="summary-grid">
+        <div class="summary-card">
+            <div class="summary-card-value">{{ total_doctors }}</div>
+            <div class="summary-card-label">Total Doctors</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value success">{{ active_doctors }}</div>
+            <div class="summary-card-label">Active</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value warning">{{ pending_approval }}</div>
+            <div class="summary-card-label">Pending Approval</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value danger">{{ inactive_doctors }}</div>
+            <div class="summary-card-label">Inactive / Suspended</div>
+        </div>
+    </div>
+    <div class="summary-grid summary-grid-3">
+        <div class="summary-card">
+            <div class="summary-card-value info">{{ total_specialties }}</div>
+            <div class="summary-card-label">Specialties</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value accent">{{ avg_rating }}</div>
+            <div class="summary-card-label">Avg. Rating</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-value">{{ total_reviews }}</div>
+            <div class="summary-card-label">Total Reviews</div>
+        </div>
+    </div>
+</div>
+
+<!-- ========================
+     CHARTS
+     ======================== -->
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">C</span>
+        Visual Overview
+    </div>
+    <div class="chart-row">
+        <div class="chart-box">
+            <div class="chart-box-title">Doctors by Status</div>
+            <div class="donut-chart-wrap">
+                <div class="section-subtitle text-center">Total: {{ total_doctors }}</div>
+                {% if status_chart_segments %}
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th class="text-center">Count</th>
+                            <th class="text-center">Percent</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for seg in status_chart_segments %}
+                        <tr>
+                            <td class="text-bold">{{ seg.label }}</td>
+                            <td class="text-center text-bold">{{ seg.value }}</td>
+                            <td class="text-center">{{ seg.percentage }}%</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="chart-box">
+            <div class="chart-box-title">Doctors by Specialty</div>
+            <div class="hbar-chart">
+                {% for s in specialty_chart %}
+                <div class="hbar-item">
+                    <span class="hbar-label">{{ s.name|truncatewords:2 }}</span>
+                    <div class="hbar-track">
+                        <div class="hbar-fill fill-{{ forloop.counter }}" style="width: {{ s.bar_percent }}%;"></div>
+                    </div>
+                    <span class="hbar-value">{{ s.count }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Top Doctors Rating Chart -->
+{% if rating_chart %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">R</span>
+        Top Doctors by Rating
+    </div>
+    <div class="hbar-chart">
+        {% for d in rating_chart %}
+        <div class="hbar-item">
+            <span class="hbar-label">Dr. {{ d.name|truncatewords:2 }}</span>
+            <div class="hbar-track">
+                <div class="hbar-fill accent" style="width: {{ d.bar_percent }}%;"></div>
+            </div>
+            <span class="hbar-value">{{ d.rating }} / 5.0</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- ========================
+     SPECIALTY BREAKDOWN
+     ======================== -->
+{% if specialty_breakdown %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">C</span>
+        Specialty Breakdown
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Specialty</th>
+                <th class="text-center">Doctors</th>
+                <th class="text-center">Avg. Rating</th>
+                <th class="text-center">Total Appointments</th>
+                <th class="text-right">Total Revenue</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in specialty_breakdown %}
+            <tr>
+                <td class="text-bold">{{ item.specialty }}</td>
+                <td class="text-center">{{ item.count }}</td>
+                <td class="text-center">{{ item.avg_rating }}</td>
+                <td class="text-center">{{ item.total_appointments }}</td>
+                <td class="text-right">{{ item.total_revenue }} EGP</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- ========================
+     DOCTORS LIST
+     ======================== -->
+<div class="section">
+    <div class="section-title">
+        <span class="section-title-icon">D</span>
+        Doctors Directory
+    </div>
+
+    {% if doctors %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Specialty</th>
+                <th class="text-center">Rating</th>
+                <th class="text-center">Reviews</th>
+                <th>License</th>
+                <th>Syndicate #</th>
+                <th>Joined</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for doc in doctors %}
+            <tr>
+                <td>{{ forloop.counter }}</td>
+                <td class="text-bold">Dr. {{ doc.user.first_name }} {{ doc.user.last_name }}</td>
+                <td>{{ doc.user.email }}</td>
+                <td>{{ doc.specialty }}</td>
+                <td class="text-center">{{ doc.rating }}</td>
+                <td class="text-center">{{ doc.total_reviews }}</td>
+                <td>
+                    <span class="badge badge-{{ doc.license_status }}">{{ doc.license_status }}</span>
+                </td>
+                <td>{{ doc.syndicate_number|default:"-" }}</td>
+                <td>{{ doc.created_at|date:"M d, Y" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No doctors found.</div>
+    {% endif %}
+</div>
+
+<!-- ========================
+     TOP RATED DOCTORS
+     ======================== -->
+{% if top_doctors %}
+<div class="section no-break">
+    <div class="section-title">
+        <span class="section-title-icon">T</span>
+        Top Rated Doctors
+    </div>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Doctor</th>
+                <th>Specialty</th>
+                <th class="text-center">Rating</th>
+                <th class="text-center">Reviews</th>
+                <th class="text-center">Appointments</th>
+                <th class="text-right">Revenue</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for doc in top_doctors %}
+            <tr>
+                <td class="text-bold text-primary">#{{ forloop.counter }}</td>
+                <td class="text-bold">Dr. {{ doc.user.first_name }} {{ doc.user.last_name }}</td>
+                <td>{{ doc.specialty }}</td>
+                <td class="text-center">
+                    <span class="star-rating">
+                        {% for i in "12345" %}{% if forloop.counter <= doc.rating %}&#9733;{% else %}&#9734;{% endif %}{% endfor %}
+                    </span>
+                    <br><span class="text-small">{{ doc.rating }}/5.0</span>
+                </td>
+                <td class="text-center">{{ doc.total_reviews }}</td>
+                <td class="text-center">{{ doc.total_appointments }}</td>
+                <td class="text-right">{{ doc.total_revenue }} EGP</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% endblock %}

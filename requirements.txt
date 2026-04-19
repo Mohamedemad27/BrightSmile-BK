@@ -9,6 +9,7 @@ django-silk==0.5.2
 djangorestframework==3.16.1
 djangorestframework-simplejwt==5.5.0
 drf-yasg==1.21.11
+drf-spectacular==0.27.2
 idna==3.11
 inflection==0.5.1
 Jinja2==3.1.6
@@ -34,3 +35,10 @@ google-auth==2.38.0
 celery==5.4.0
 gunicorn==23.0.0
 psycopg2-binary==2.9.10
+mediapipe==0.10.33
+opencv-python-headless==4.8.0.76
+numpy==1.26.4
+boto3==1.40.61
+openpyxl==3.1.5
+xhtml2pdf==0.2.17
+playwright==1.54.0

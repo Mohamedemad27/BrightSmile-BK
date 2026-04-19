@@ -31,8 +31,12 @@ REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'] = [
     'rest_framework.renderers.BrowsableAPIRenderer',
 ]
 
-# Email backend for development (console output)
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+# Email backend for development:
+# Read from environment and default to SMTP so dev matches production delivery.
+EMAIL_BACKEND = config(
+    'EMAIL_BACKEND',
+    default='django.core.mail.backends.smtp.EmailBackend'
+)
 
 # Logging configuration
 LOGGING = {
