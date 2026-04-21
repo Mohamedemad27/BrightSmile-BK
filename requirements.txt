@@ -36,7 +36,7 @@ google-auth==2.38.0
 celery==5.4.0
 gunicorn==23.0.0
 psycopg2-binary==2.9.10
-mediapipe==0.10.33
+mediapipe==0.10.18
 opencv-python-headless==4.8.0.76
 numpy==1.26.4
 boto3==1.40.61

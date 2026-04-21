@@ -557,6 +557,9 @@ class LoginView(APIView):
             user.last_login = timezone.now()
             user.save(update_fields=['last_login'])
 
+            _log_login_event(request, user, action='login_succeeded')
+            request._audit_logged = True
+
             return Response({
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
@@ -564,6 +567,21 @@ class LoginView(APIView):
             }, status=status.HTTP_200_OK)
 
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+def _log_login_event(request, user, action: str) -> None:
+    """Audit-log an authentication event (login succeeded, logout, etc.)."""
+    from apps.dashboard.services import AuditService
+    xff = request.META.get('HTTP_X_FORWARDED_FOR')
+    ip = (xff.split(',')[0].strip() if xff else request.META.get('REMOTE_ADDR'))
+    AuditService.log_action(
+        user=user,
+        action=action,
+        target_type='User',
+        target_id=str(user.id),
+        description=f"User {user.email} {action.replace('_', ' ')}",
+        ip_address=ip,
+    )
 
 
 class TokenRefreshView(APIView):

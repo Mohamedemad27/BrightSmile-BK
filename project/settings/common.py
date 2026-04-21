@@ -52,6 +52,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'utils.middleware.audit_logging.AuditLoggingMiddleware',
 ]
 
 ROOT_URLCONF = 'project.urls'
@@ -252,6 +253,20 @@ FEATURE_FLAGS = {
 SYNDICATE_SOURCE_URL = config('SYNDICATE_SOURCE_URL', default='')
 SYNDICATE_TIMEOUT_SECONDS = config('SYNDICATE_TIMEOUT_SECONDS', default=5, cast=int)
 IDEMPOTENCY_CACHE_TTL_SECONDS = config('IDEMPOTENCY_CACHE_TTL_SECONDS', default=3600, cast=int)
+
+# Smile-preview integration — provider selector + per-provider credentials
+AI_PROVIDER = config('AI_PROVIDER', default='gemini')  # 'gemini' | 'huggingface' | 'cloudflare'
+NANOBANANAPRO_API_KEY = config('NANOBANANAPRO_API_KEY', default='')
+NANOBANANAPRO_MODEL = config('NANOBANANAPRO_MODEL', default='gemini-3-pro-image-preview')
+HUGGINGFACE_API_TOKEN = config('HUGGINGFACE_API_TOKEN', default='')
+HUGGINGFACE_ENDPOINT_URL = config(
+    'HUGGINGFACE_ENDPOINT_URL',
+    default='https://router.huggingface.co/fal-ai/fal-ai/flux-kontext/dev',
+)
+CLOUDFLARE_ACCOUNT_ID = config('CLOUDFLARE_ACCOUNT_ID', default='')
+CLOUDFLARE_API_TOKEN = config('CLOUDFLARE_API_TOKEN', default='')
+CLOUDFLARE_MODEL = config('CLOUDFLARE_MODEL', default='@cf/runwayml/stable-diffusion-v1-5-img2img')
+BACKEND_PUBLIC_URL = config('BACKEND_PUBLIC_URL', default='http://localhost:8000')
 
 # Reports storage (MinIO / S3 compatible)
 REPORTS_STORAGE_ENDPOINT = config('REPORTS_STORAGE_ENDPOINT', default='')

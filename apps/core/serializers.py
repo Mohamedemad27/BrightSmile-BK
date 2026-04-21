@@ -68,6 +68,15 @@ class DoctorReviewSerializer(serializers.ModelSerializer):
         fields = ['id', 'patient_name', 'rating', 'comment', 'created_at']
 
 
+class FeaturedReviewSerializer(serializers.ModelSerializer):
+    patient_name = serializers.CharField(read_only=True)
+    doctor_name = serializers.CharField(source='doctor.full_name', read_only=True)
+
+    class Meta:
+        model = DoctorReview
+        fields = ['id', 'patient_name', 'doctor_name', 'rating', 'comment', 'created_at']
+
+
 class DoctorDetailSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(source='user.id')
     name = serializers.CharField(source='user.get_full_name')

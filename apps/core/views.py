@@ -28,6 +28,7 @@ from .serializers import (
     DoctorDetailSerializer,
     DoctorServiceSerializer,
     FavoriteDoctorSerializer,
+    FeaturedReviewSerializer,
     HealthCheckSerializer,
     HealthTipSerializer,
     MedicalHistorySerializer,
@@ -299,7 +300,7 @@ class DailyTipView(APIView):
 class TopDoctorsView(APIView):
     """Returns top 4 rated doctors, cached for 1 hour."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = []
 
     @swagger_auto_schema(
         operation_id='top_doctors',
@@ -331,6 +332,27 @@ class TopDoctorsView(APIView):
         cache.set(cache_key, json.dumps(data, default=str), timeout=3600)
 
         return Response(data)
+
+
+class FeaturedReviewsView(APIView):
+    """Returns up to 10 featured reviews for the public landing page."""
+
+    permission_classes = []
+
+    @swagger_auto_schema(
+        operation_id='featured_reviews',
+        operation_summary='Get featured reviews',
+        operation_description='Returns up to 10 reviews sorted by rating then recency. Public endpoint.',
+        responses={200: FeaturedReviewSerializer(many=True)},
+        tags=['Reviews'],
+    )
+    def get(self, request):
+        reviews = (
+            DoctorReview.objects
+            .select_related('user', 'doctor__user')
+            .order_by('-rating', '-created_at')[:10]
+        )
+        return Response(FeaturedReviewSerializer(reviews, many=True).data)
 
 
 class ServiceCategoriesView(APIView):

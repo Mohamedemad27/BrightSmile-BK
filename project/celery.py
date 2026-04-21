@@ -21,11 +21,11 @@ app.autodiscover_tasks()
 
 # Celery Beat schedule for periodic tasks
 app.conf.beat_schedule = {
-    # Example: Run every 30 minutes
-    # 'sample-task': {
-    #     'task': 'apps.yourapp.tasks.sample_task',
-    #     'schedule': crontab(minute='*/30'),
-    # },
+    # Keep the Smilix doctor registry in sync with the syndicate portal.
+    'syndicate-sync': {
+        'task': 'apps.dashboard.tasks.sync_syndicate_task',
+        'schedule': 30.0,  # seconds — keeps dashboard "live" without manual refresh
+    },
 }
 
 
