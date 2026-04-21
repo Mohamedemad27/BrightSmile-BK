@@ -211,13 +211,9 @@ PASSWORD_RESET_OTP_EXPIRY_MINUTES = config('PASSWORD_RESET_OTP_EXPIRY_MINUTES', 
 PASSWORD_RESET_TOKEN_EXPIRY_MINUTES = config('PASSWORD_RESET_TOKEN_EXPIRY_MINUTES', default=10, cast=int)
 
 # Email Configuration
-EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.smtp.EmailBackend')
-EMAIL_HOST = config('EMAIL_HOST', default='smtp.sendgrid.net')
-EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
-EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
-EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='apikey')
-EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@brightsmile.com')
+OTP_EMAILS_SYNC = config('OTP_EMAILS_SYNC', default=False, cast=bool)
 
 # JWT Configuration
 SIMPLE_JWT = {

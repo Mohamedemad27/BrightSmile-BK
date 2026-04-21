@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
+from django.conf import settings
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -59,9 +60,26 @@ from .serializers import (
     VerifyOTPResponseSerializer,
     VerifyOTPSerializer,
 )
-from .tasks import send_password_reset_email_task, send_verification_email_task
+from .tasks import (
+    dispatch_password_reset_email,
+    dispatch_verification_email,
+    send_password_reset_email_task,
+    send_verification_email_task,
+)
 
 User = get_user_model()
+
+
+def _send_verification_email(user_id, otp):
+    if settings.OTP_EMAILS_SYNC:
+        return dispatch_verification_email(user_id, otp)
+    return send_verification_email_task.delay(user_id, otp)
+
+
+def _send_password_reset_email(user_id, otp):
+    if settings.OTP_EMAILS_SYNC:
+        return dispatch_password_reset_email(user_id, otp)
+    return send_password_reset_email_task.delay(user_id, otp)
 
 
 class PatientRegistrationView(APIView):
@@ -308,7 +326,7 @@ class RequestOTPView(APIView):
 
             # Create OTP and send email
             otp_instance, otp_plain = EmailVerificationOTP.create_for_user(user)
-            send_verification_email_task.delay(user.id, otp_plain)
+            _send_verification_email(user.id, otp_plain)
 
             return Response({
                 'message': 'Verification code sent to your email.',
@@ -1820,7 +1838,7 @@ class PasswordResetRequestView(APIView):
 
             # Create OTP and send email
             otp_instance, otp_plain = PasswordResetOTP.create_for_user(user)
-            send_password_reset_email_task.delay(user.id, otp_plain)
+            _send_password_reset_email(user.id, otp_plain)
 
             return Response({
                 'message': 'If an account exists with this email, a password reset code has been sent.',

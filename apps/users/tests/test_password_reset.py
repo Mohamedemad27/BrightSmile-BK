@@ -167,6 +167,7 @@ class PasswordResetTokenModelTestCase(TestCase):
         self.assertIn('Active', str(token))
 
 
+@override_settings(OTP_EMAILS_SYNC=False)
 class PasswordResetRequestViewTestCase(APITestCase):
     """Test cases for password reset request endpoint."""
 
@@ -477,6 +478,7 @@ class PasswordResetConfirmViewTestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
 
+@override_settings(OTP_EMAILS_SYNC=False)
 class PasswordResetIntegrationTestCase(APITestCase):
     """Integration tests for the complete password reset flow."""
 

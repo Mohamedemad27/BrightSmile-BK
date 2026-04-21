@@ -145,6 +145,7 @@ class EmailVerificationOTPModelTestCase(TestCase):
         self.assertIn(self.user.email, str(otp_instance))
 
 
+@override_settings(OTP_EMAILS_SYNC=False)
 class RequestOTPViewTestCase(APITestCase):
     """Test cases for request OTP endpoint."""
 
@@ -461,6 +462,7 @@ class VerifyOTPViewTestCase(APITestCase):
         self.assertNotEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
 
+@override_settings(OTP_EMAILS_SYNC=False)
 class OTPSignalTestCase(APITestCase):
     """Test cases for OTP signals on registration."""
 
@@ -554,45 +556,46 @@ class CeleryTaskTestCase(TestCase):
             user_type='patient'
         )
 
-    @patch('apps.users.tasks.send_mail')
-    def test_send_verification_email_task_success(self, mock_send_mail):
+    @patch('apps.users.tasks.send_otp_email')
+    def test_send_verification_email_task_success(self, mock_send_otp_email):
         """Test that email task sends email successfully."""
         from apps.users.tasks import send_verification_email_task
+        mock_send_otp_email.return_value.status_code = 202
 
         result = send_verification_email_task(self.user.id, '123456')
 
         self.assertTrue(result)
-        mock_send_mail.assert_called_once()
+        mock_send_otp_email.assert_called_once()
 
-    @patch('apps.users.tasks.send_mail')
-    def test_send_verification_email_task_user_not_found(self, mock_send_mail):
+    @patch('apps.users.tasks.send_otp_email')
+    def test_send_verification_email_task_user_not_found(self, mock_send_otp_email):
         """Test that email task handles nonexistent user."""
         from apps.users.tasks import send_verification_email_task
 
         result = send_verification_email_task(99999, '123456')
 
         self.assertFalse(result)
-        mock_send_mail.assert_not_called()
+        mock_send_otp_email.assert_not_called()
 
-    @patch('apps.users.tasks.send_mail')
-    def test_send_verification_email_contains_otp(self, mock_send_mail):
+    @patch('apps.users.tasks.send_otp_email')
+    def test_send_verification_email_contains_otp(self, mock_send_otp_email):
         """Test that email contains the OTP code."""
         from apps.users.tasks import send_verification_email_task
+        mock_send_otp_email.return_value.status_code = 202
 
         otp = '123456'
         send_verification_email_task(self.user.id, otp)
 
-        call_args = mock_send_mail.call_args
-        # Check both plain message and HTML message contain OTP
-        self.assertIn(otp, call_args.kwargs.get('message', ''))
-        self.assertIn(otp, call_args.kwargs.get('html_message', ''))
+        call_args = mock_send_otp_email.call_args
+        self.assertEqual(call_args.args[1], otp)
 
-    @patch('apps.users.tasks.send_mail')
-    def test_send_verification_email_to_correct_recipient(self, mock_send_mail):
+    @patch('apps.users.tasks.send_otp_email')
+    def test_send_verification_email_to_correct_recipient(self, mock_send_otp_email):
         """Test that email is sent to correct recipient."""
         from apps.users.tasks import send_verification_email_task
+        mock_send_otp_email.return_value.status_code = 202
 
         send_verification_email_task(self.user.id, '123456')
 
-        call_args = mock_send_mail.call_args
-        self.assertIn(self.user.email, call_args.kwargs.get('recipient_list', []))
+        call_args = mock_send_otp_email.call_args
+        self.assertEqual(call_args.args[0], self.user.email)

@@ -1,33 +1,45 @@
 import logging
-from datetime import datetime
 
 from celery import shared_task
 from django.conf import settings
-from django.core.mail import send_mail
-from django.template.loader import render_to_string
+
+from .services.email_service import (
+    SendGridEmailError,
+    send_otp_email,
+    send_password_reset_email,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def _get_email_context(user, otp, expiry_minutes):
+def dispatch_verification_email(user_id, otp):
     """
-    Build common email context for OTP emails.
-
-    Args:
-        user: User instance
-        otp: Plain text OTP code
-        expiry_minutes: OTP expiry time in minutes
-
-    Returns:
-        dict: Context dictionary for email templates
+    Send verification email immediately when debugging SMTP issues, otherwise
+    enqueue it through Celery.
     """
-    return {
-        'full_name': user.get_full_name(),
-        'email': user.email,
-        'otp': otp,
-        'expiry_minutes': expiry_minutes,
-        'year': datetime.now().year,
-    }
+    if settings.OTP_EMAILS_SYNC:
+        logger.info(
+            "OTP_EMAILS_SYNC enabled; sending verification email synchronously | user_id=%s",
+            user_id,
+        )
+        send_verification_email_task(user_id, otp)
+        return None
+    return send_verification_email_task.delay(user_id, otp)
+
+
+def dispatch_password_reset_email(user_id, otp):
+    """
+    Send password-reset email immediately when debugging SMTP issues, otherwise
+    enqueue it through Celery.
+    """
+    if settings.OTP_EMAILS_SYNC:
+        logger.info(
+            "OTP_EMAILS_SYNC enabled; sending password reset email synchronously | user_id=%s",
+            user_id,
+        )
+        send_password_reset_email_task(user_id, otp)
+        return None
+    return send_password_reset_email_task.delay(user_id, otp)
 
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
@@ -47,38 +59,26 @@ def send_verification_email_task(self, user_id, otp):
     try:
         user = User.objects.get(id=user_id)
 
-        context = _get_email_context(user, otp, settings.OTP_EXPIRY_MINUTES)
-
-        subject = 'Verify Your Email - Bright Smile'
-        message = render_to_string('emails/verification_email.txt', context)
-        html_message = render_to_string('emails/verification_email.html', context)
-
         logger.info(
-            "Sending verification OTP email | task_id=%s user_id=%s to=%s backend=%s host=%s port=%s tls=%s from=%s",
+            "Sending verification OTP email via SendGrid API | task_id=%s user_id=%s to=%s from=%s",
             getattr(self.request, 'id', None),
             user_id,
             user.email,
-            settings.EMAIL_BACKEND,
-            settings.EMAIL_HOST,
-            settings.EMAIL_PORT,
-            settings.EMAIL_USE_TLS,
             settings.DEFAULT_FROM_EMAIL,
         )
-        sent_count = send_mail(
-            subject=subject,
-            message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            html_message=html_message,
-            fail_silently=False,
+        response = send_otp_email(
+            user.email,
+            otp,
+            full_name=user.get_full_name(),
+            expiry_minutes=settings.OTP_EXPIRY_MINUTES,
         )
 
         logger.info(
-            "Verification OTP email send_mail completed | task_id=%s user_id=%s to=%s sent_count=%s",
+            "Verification OTP email SendGrid API completed | task_id=%s user_id=%s to=%s status=%s",
             getattr(self.request, 'id', None),
             user_id,
             user.email,
-            sent_count,
+            response.status_code,
         )
         return True
 
@@ -86,9 +86,8 @@ def send_verification_email_task(self, user_id, otp):
         logger.error(f"User with ID {user_id} not found")
         return False
 
-    except Exception as e:
+    except SendGridEmailError as e:
         logger.exception("Failed to send verification OTP email | task_id=%s user_id=%s", getattr(self.request, 'id', None), user_id)
-        # Retry the task
         raise self.retry(exc=e)
 
 
@@ -109,38 +108,26 @@ def send_password_reset_email_task(self, user_id, otp):
     try:
         user = User.objects.get(id=user_id)
 
-        context = _get_email_context(user, otp, settings.PASSWORD_RESET_OTP_EXPIRY_MINUTES)
-
-        subject = 'Reset Your Password - Bright Smile'
-        message = render_to_string('emails/password_reset_email.txt', context)
-        html_message = render_to_string('emails/password_reset_email.html', context)
-
         logger.info(
-            "Sending password reset OTP email | task_id=%s user_id=%s to=%s backend=%s host=%s port=%s tls=%s from=%s",
+            "Sending password reset OTP email via SendGrid API | task_id=%s user_id=%s to=%s from=%s",
             getattr(self.request, 'id', None),
             user_id,
             user.email,
-            settings.EMAIL_BACKEND,
-            settings.EMAIL_HOST,
-            settings.EMAIL_PORT,
-            settings.EMAIL_USE_TLS,
             settings.DEFAULT_FROM_EMAIL,
         )
-        sent_count = send_mail(
-            subject=subject,
-            message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
-            html_message=html_message,
-            fail_silently=False,
+        response = send_password_reset_email(
+            user.email,
+            otp,
+            full_name=user.get_full_name(),
+            expiry_minutes=settings.PASSWORD_RESET_OTP_EXPIRY_MINUTES,
         )
 
         logger.info(
-            "Password reset OTP email send_mail completed | task_id=%s user_id=%s to=%s sent_count=%s",
+            "Password reset OTP email SendGrid API completed | task_id=%s user_id=%s to=%s status=%s",
             getattr(self.request, 'id', None),
             user_id,
             user.email,
-            sent_count,
+            response.status_code,
         )
         return True
 
@@ -148,7 +135,6 @@ def send_password_reset_email_task(self, user_id, otp):
         logger.error(f"User with ID {user_id} not found")
         return False
 
-    except Exception as e:
+    except SendGridEmailError as e:
         logger.exception("Failed to send password reset OTP email | task_id=%s user_id=%s", getattr(self.request, 'id', None), user_id)
-        # Retry the task
         raise self.retry(exc=e)

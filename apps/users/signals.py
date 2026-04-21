@@ -14,13 +14,13 @@ def send_verification_otp(user):
         user: The User instance to send OTP to
     """
     from apps.users.models import EmailVerificationOTP
-    from apps.users.tasks import send_verification_email_task
+    from apps.users.tasks import dispatch_verification_email
 
     # Create OTP for user
     otp_instance, otp_plain = EmailVerificationOTP.create_for_user(user)
 
     # Send email via Celery background task
-    send_verification_email_task.delay(user.id, otp_plain)
+    dispatch_verification_email(user.id, otp_plain)
 
     logger.info(f"Verification OTP sent to {user.email}")
 

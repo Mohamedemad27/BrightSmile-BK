@@ -55,6 +55,7 @@ services:
   web:
     build: .
     container_name: bright_smile_web
+    entrypoint: []
     command: >
       sh -c "python manage.py migrate &&
              (python manage.py collectstatic --noinput || true) &&
@@ -83,6 +84,7 @@ services:
   celery_worker:
     build: .
     container_name: bright_smile_celery_worker
+    entrypoint: []
     command: celery -A project worker --loglevel=info
     volumes:
       - .:/app
@@ -102,6 +104,7 @@ services:
   celery_beat:
     build: .
     container_name: bright_smile_celery_beat
+    entrypoint: []
     command: celery -A project beat --loglevel=info
     volumes:
       - .:/app
