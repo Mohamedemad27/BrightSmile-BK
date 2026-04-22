@@ -28,12 +28,14 @@ Response shape:
 from __future__ import annotations
 
 import base64
+import io
 import logging
 import mimetypes
 import uuid
 from typing import Iterable, List
 
 import requests
+from PIL import Image
 from celery import shared_task
 from celery.result import AsyncResult
 from django.conf import settings
@@ -116,6 +118,30 @@ def _build_sd_prompt_pair(services: Iterable[str]) -> tuple[str, str]:
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
+# Gemini image size buckets (longest edge in px) — pick the smallest one that
+# covers the input so we never upscale during generation.
+GEMINI_SIZE_BUCKETS = (('1K', 1024), ('2K', 2048), ('4K', 4096))
+
+# Aspect ratios Gemini 3 Pro Image supports. We snap the input's ratio to the
+# closest one so output framing roughly matches the input.
+GEMINI_ASPECT_RATIOS = (
+    ('1:1', 1 / 1), ('2:3', 2 / 3), ('3:2', 3 / 2),
+    ('3:4', 3 / 4), ('4:3', 4 / 3), ('4:5', 4 / 5), ('5:4', 5 / 4),
+    ('9:16', 9 / 16), ('16:9', 16 / 9), ('21:9', 21 / 9),
+)
+
+
+def _pick_gemini_size(max_dim: int) -> str:
+    for label, cap in GEMINI_SIZE_BUCKETS:
+        if max_dim <= cap:
+            return label
+    return '4K'
+
+
+def _pick_gemini_aspect(width: int, height: int) -> str:
+    target = width / height
+    return min(GEMINI_ASPECT_RATIOS, key=lambda x: abs(x[1] - target))[0]
+
 
 def _build_prompt(services: Iterable[str], style: str = 'narrative') -> str:
     """Build a prompt. `style='narrative'` for Gemini, `style='instruction'` for InstructPix2Pix."""
@@ -135,13 +161,19 @@ def _build_prompt(services: Iterable[str], style: str = 'narrative') -> str:
 
 # ─── Gemini HTTP client ───
 
-def call_gemini(image_bytes: bytes, mime_type: str, prompt: str) -> bytes:
+def call_gemini(
+    image_bytes: bytes,
+    mime_type: str,
+    prompt: str,
+    image_size: str | None = None,
+    aspect_ratio: str | None = None,
+) -> bytes:
     """POST image + prompt to Gemini image model; return the generated PNG bytes."""
     api_key = getattr(settings, 'NANOBANANAPRO_API_KEY', '') or ''
     if not api_key:
         raise RuntimeError('NANOBANANAPRO_API_KEY is not configured')
 
-    payload = {
+    payload: dict = {
         'contents': [{
             'parts': [
                 {'inline_data': {
@@ -152,6 +184,15 @@ def call_gemini(image_bytes: bytes, mime_type: str, prompt: str) -> bytes:
             ],
         }],
     }
+
+    image_config: dict = {}
+    if image_size:
+        image_config['imageSize'] = image_size
+    if aspect_ratio:
+        image_config['aspectRatio'] = aspect_ratio
+    if image_config:
+        payload['generationConfig'] = {'imageConfig': image_config}
+
     model = getattr(settings, 'NANOBANANAPRO_MODEL', GEMINI_DEFAULT_MODEL) or GEMINI_DEFAULT_MODEL
     response = requests.post(
         f'{GEMINI_API_BASE}/{model}:generateContent',
@@ -269,16 +310,42 @@ def call_cloudflare(image_bytes: bytes, prompt: str, negative_prompt: str = '') 
 
 # ─── Provider dispatch ───
 
+def _match_input_resolution(output_bytes: bytes, target_size: tuple[int, int]) -> bytes:
+    """Resize the generated image to exactly match the original input dimensions."""
+    img = Image.open(io.BytesIO(output_bytes))
+    if img.size == target_size:
+        return output_bytes
+    if img.mode not in ('RGB', 'RGBA'):
+        img = img.convert('RGB')
+    resized = img.resize(target_size, Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    resized.save(buf, format='PNG')
+    return buf.getvalue()
+
+
 def _generate_image(image_bytes: bytes, mime_type: str, services: List[str]) -> bytes:
     provider = (getattr(settings, 'AI_PROVIDER', 'gemini') or 'gemini').lower()
+
+    input_size = Image.open(io.BytesIO(image_bytes)).size  # (width, height)
+
     if provider == 'huggingface':
-        return call_huggingface(image_bytes, mime_type, _build_prompt(services, style='instruction'))
-    if provider == 'cloudflare':
+        output = call_huggingface(image_bytes, mime_type, _build_prompt(services, style='instruction'))
+    elif provider == 'cloudflare':
         positive, negative = _build_sd_prompt_pair(services)
-        return call_cloudflare(image_bytes, positive, negative)
-    if provider == 'gemini':
-        return call_gemini(image_bytes, mime_type, _build_prompt(services, style='narrative'))
-    raise RuntimeError(f'Unknown AI_PROVIDER: {provider!r}. Use "gemini", "huggingface", or "cloudflare".')
+        output = call_cloudflare(image_bytes, positive, negative)
+    elif provider == 'gemini':
+        width, height = input_size
+        output = call_gemini(
+            image_bytes,
+            mime_type,
+            _build_prompt(services, style='narrative'),
+            image_size=_pick_gemini_size(max(width, height)),
+            aspect_ratio=_pick_gemini_aspect(width, height),
+        )
+    else:
+        raise RuntimeError(f'Unknown AI_PROVIDER: {provider!r}. Use "gemini", "huggingface", or "cloudflare".')
+
+    return _match_input_resolution(output, input_size)
 
 
 # Backward-compat alias — external imports still work after the refactor
