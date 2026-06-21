@@ -277,6 +277,11 @@ REPORTS_STORAGE_SECRET_KEY = config('REPORTS_STORAGE_SECRET_KEY', default='')
 REPORTS_PUBLIC_BASE_URL = config('REPORTS_PUBLIC_BASE_URL', default='')
 REPORTS_DOWNLOAD_URL_EXPIRY_SECONDS = config('REPORTS_DOWNLOAD_URL_EXPIRY_SECONDS', default=86400, cast=int)
 
+# Paymob checkout configuration
+PAYMOB_SECRET_KEY = config('PAYMOB_SECRET_KEY', default='')
+PAYMOB_PUBLIC_KEY = config('PAYMOB_PUBLIC_KEY', default='')
+PAYMOB_INTEGRATION_ID = config('PAYMOB_INTEGRATION_ID', default=0, cast=int)
+
 # Logging
 LOGGING = {
     'version': 1,

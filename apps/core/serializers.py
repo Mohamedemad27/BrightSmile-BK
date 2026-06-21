@@ -4,7 +4,19 @@ from apps.users.models import Doctor
 
 from apps.users.models import Patient
 
-from .models import Appointment, DoctorReview, DoctorService, FavoriteDoctor, HealthTip, MedicalHistory, Notification, ServiceCategory
+from .models import (
+    Appointment,
+    DoctorReview,
+    DoctorService,
+    FavoriteDoctor,
+    HealthTip,
+    MedicalHistory,
+    Notification,
+    PaymentMethod,
+    PaymentPreference,
+    PaymentTransaction,
+    ServiceCategory,
+)
 
 
 class ServiceCategorySerializer(serializers.ModelSerializer):
@@ -167,6 +179,91 @@ class AppointmentStatusUpdateSerializer(serializers.Serializer):
 class ReviewCreateSerializer(serializers.Serializer):
     rating = serializers.IntegerField(min_value=1, max_value=5)
     comment = serializers.CharField(max_length=500)
+
+
+class PaymentCheckoutSessionCreateSerializer(serializers.Serializer):
+    appointment_id = serializers.UUIDField()
+    provider = serializers.ChoiceField(choices=['paymob'], default='paymob')
+
+
+class PaymentTransactionSerializer(serializers.ModelSerializer):
+    appointment_id = serializers.UUIDField(source='appointment.id')
+
+    class Meta:
+        model = PaymentTransaction
+        fields = [
+            'id',
+            'appointment_id',
+            'provider',
+            'status',
+            'amount',
+            'currency',
+            'checkout_url',
+            'provider_reference',
+            'created_at',
+            'updated_at',
+            'paid_at',
+        ]
+        read_only_fields = fields
+
+
+class PaymentMethodSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PaymentMethod
+        fields = [
+            'id',
+            'brand',
+            'last4',
+            'holder_name',
+            'expiry',
+            'is_default',
+            'is_active',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class PaymentMethodCreateSerializer(serializers.Serializer):
+    brand = serializers.ChoiceField(choices=['visa', 'mastercard'])
+    card_number = serializers.CharField(max_length=24)
+    holder_name = serializers.CharField(max_length=120)
+    expiry = serializers.CharField(max_length=7)
+    is_default = serializers.BooleanField(required=False, default=False)
+
+    def validate_card_number(self, value):
+        digits = ''.join(ch for ch in value if ch.isdigit())
+        if len(digits) < 4:
+            raise serializers.ValidationError('Card number must include at least 4 digits.')
+        return digits
+
+    def validate_expiry(self, value):
+        normalized = value.strip()
+        if len(normalized) != 5 or normalized[2] != '/':
+            raise serializers.ValidationError('Expiry must be in MM/YY format.')
+        mm, yy = normalized.split('/')
+        if not (mm.isdigit() and yy.isdigit()):
+            raise serializers.ValidationError('Expiry must be in MM/YY format.')
+        month = int(mm)
+        if month < 1 or month > 12:
+            raise serializers.ValidationError('Expiry month must be between 01 and 12.')
+        return normalized
+
+
+class PaymentMethodUpdateSerializer(serializers.Serializer):
+    is_default = serializers.BooleanField(required=True)
+
+
+class PaymentPreferenceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PaymentPreference
+        fields = [
+            'mobile_wallet_enabled',
+            'mobile_wallet_provider',
+            'cash_on_visit_enabled',
+            'updated_at',
+        ]
+        read_only_fields = ['updated_at']
 
 
 # ─── Notification Serializers ───

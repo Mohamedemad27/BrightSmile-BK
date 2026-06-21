@@ -25,6 +25,16 @@ INTERNAL_IPS = [
     'localhost',
 ]
 
+
+def show_debug_toolbar(request):
+    """Keep development debugging tools out of printable report HTML."""
+    return not request.path.startswith('/api/v1/reports/')
+
+
+DEBUG_TOOLBAR_CONFIG = {
+    'SHOW_TOOLBAR_CALLBACK': 'project.settings.dev.show_debug_toolbar',
+}
+
 # REST Framework - Add Browsable API for development
 REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'] = [
     'rest_framework.renderers.JSONRenderer',
