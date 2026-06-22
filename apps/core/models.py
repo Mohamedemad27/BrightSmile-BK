@@ -197,3 +197,109 @@ class FavoriteDoctor(models.Model):
 
     def __str__(self):
         return f"{self.user.email} → {self.doctor.full_name}"
+
+
+
+class PaymentTransaction(models.Model):
+    PROVIDER_CHOICES = [
+        ('paymob', 'Paymob'),
+    ]
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('processing', 'Processing'),
+        ('paid', 'Paid'),
+        ('failed', 'Failed'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    appointment = models.ForeignKey(
+        Appointment,
+        on_delete=models.CASCADE,
+        related_name='payment_transactions',
+    )
+    user = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='payment_transactions',
+    )
+    provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES, default='paymob')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=8, default='EGP')
+    checkout_url = models.URLField(max_length=1000, blank=True, default='')
+    provider_reference = models.CharField(max_length=255, blank=True, default='', db_index=True)
+    client_secret = models.CharField(max_length=500, blank=True, default='')
+    provider_payload = models.JSONField(default=dict, blank=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'status'], name='pay_tx_user_status_idx'),
+            models.Index(fields=['appointment', 'status'], name='pay_tx_appt_status_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.user.email} {self.provider} {self.status} {self.amount} {self.currency}'
+
+
+class PaymentMethod(models.Model):
+    BRAND_CHOICES = [
+        ('visa', 'Visa'),
+        ('mastercard', 'Mastercard'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='payment_methods',
+    )
+    brand = models.CharField(max_length=20, choices=BRAND_CHOICES)
+    last4 = models.CharField(max_length=4)
+    holder_name = models.CharField(max_length=120)
+    expiry = models.CharField(max_length=7)
+    is_default = models.BooleanField(default=False, db_index=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-is_default', '-created_at']
+        indexes = [
+            models.Index(fields=['user', 'is_active'], name='pay_method_user_active_idx'),
+            models.Index(fields=['user', 'is_default'], name='pay_method_user_default_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.user.email} {self.brand} ****{self.last4}'
+
+
+class PaymentPreference(models.Model):
+    WALLET_PROVIDER_CHOICES = [
+        ('vodafone_cash', 'Vodafone Cash'),
+        ('orange_cash', 'Orange Cash'),
+        ('etisalat_cash', 'Etisalat Cash'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        'users.User',
+        on_delete=models.CASCADE,
+        related_name='payment_preference',
+    )
+    mobile_wallet_enabled = models.BooleanField(default=False)
+    mobile_wallet_provider = models.CharField(
+        max_length=30,
+        choices=WALLET_PROVIDER_CHOICES,
+        blank=True,
+        default='',
+    )
+    cash_on_visit_enabled = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.user.email} wallet={self.mobile_wallet_provider or "off"} cash={self.cash_on_visit_enabled}'

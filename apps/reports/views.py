@@ -1,5 +1,7 @@
 from celery.result import AsyncResult
 from django.core.cache import cache
+from django.http import HttpResponse
+from django.template.loader import render_to_string
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -10,6 +12,17 @@ from apps.dashboard.permissions import AdminDashboardPermission, DoctorPermissio
 from .serializers import ReportExportRequestSerializer, ReportQuerySerializer
 from .services.report_data_service import ReportDataService
 from .tasks import generate_report_export_task
+
+
+REPORT_TEMPLATE_BY_TYPE = {
+    "admin_appointments": "reports/admin_appointments_report.html",
+    "admin_audit": "reports/admin_audit_report.html",
+    "admin_doctors": "reports/admin_doctors_report.html",
+    "admin_patients": "reports/admin_patients_report.html",
+    "doctor_appointments": "reports/doctor_appointments_report.html",
+    "doctor_patients": "reports/doctor_patients_report.html",
+    "patient_report": "reports/patient_report.html",
+}
 
 
 def _filters_from_request(request):
@@ -60,6 +73,19 @@ class DoctorAppointmentsReportView(APIView):
         return Response(data)
 
 
+class DoctorAppointmentsReportHtmlView(APIView):
+    permission_classes = [DoctorPermission]
+
+    def get(self, request):
+        data = ReportDataService.generate(
+            report_type="doctor_appointments",
+            user=request.user,
+            filters=_filters_from_request(request),
+        )
+        html = render_to_string(REPORT_TEMPLATE_BY_TYPE["doctor_appointments"], data)
+        return HttpResponse(html, content_type="text/html; charset=utf-8")
+
+
 class DoctorPatientsReportView(APIView):
     permission_classes = [DoctorPermission]
 
@@ -70,6 +96,19 @@ class DoctorPatientsReportView(APIView):
             filters=_filters_from_request(request),
         )
         return Response(data)
+
+
+class DoctorPatientsReportHtmlView(APIView):
+    permission_classes = [DoctorPermission]
+
+    def get(self, request):
+        data = ReportDataService.generate(
+            report_type="doctor_patients",
+            user=request.user,
+            filters=_filters_from_request(request),
+        )
+        html = render_to_string(REPORT_TEMPLATE_BY_TYPE["doctor_patients"], data)
+        return HttpResponse(html, content_type="text/html; charset=utf-8")
 
 
 class PatientReportView(APIView):

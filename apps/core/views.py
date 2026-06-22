@@ -1,10 +1,12 @@
 import json
 import time
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
 from django.core.cache import cache
 from django.db import connection
+from django.utils import timezone as dj_timezone
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
@@ -20,7 +22,20 @@ from apps.users.models import Doctor
 
 from apps.users.models import Patient
 
-from .models import Appointment, DoctorReview, DoctorService, FavoriteDoctor, HealthTip, MedicalHistory, Notification, ServiceCategory
+from .models import (
+    Appointment,
+    DoctorReview,
+    DoctorService,
+    FavoriteDoctor,
+    HealthTip,
+    MedicalHistory,
+    Notification,
+    PaymentMethod,
+    PaymentPreference,
+    PaymentTransaction,
+    ServiceCategory,
+)
+from .payments import create_paymob_intention, fetch_paymob_intention_status
 from .serializers import (
     AppointmentCreateSerializer,
     AppointmentListSerializer,
@@ -33,6 +48,12 @@ from .serializers import (
     HealthTipSerializer,
     MedicalHistorySerializer,
     NotificationSerializer,
+    PaymentMethodCreateSerializer,
+    PaymentMethodSerializer,
+    PaymentMethodUpdateSerializer,
+    PaymentPreferenceSerializer,
+    PaymentCheckoutSessionCreateSerializer,
+    PaymentTransactionSerializer,
     ProfileSerializer,
     ReviewCreateSerializer,
     ServiceCategorySerializer,
@@ -725,6 +746,261 @@ class AppointmentReviewView(APIView):
         )
 
         return Response({'detail': 'Review submitted.'}, status=status.HTTP_201_CREATED)
+
+
+class PaymentCheckoutSessionCreateView(APIView):
+    """Create a payment transaction and return checkout URL."""
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_id='create_payment_checkout_session',
+        operation_summary='Create payment checkout session',
+        request_body=PaymentCheckoutSessionCreateSerializer,
+        responses={201: PaymentTransactionSerializer, 400: 'Validation error', 404: 'Appointment not found'},
+        tags=['Payments'],
+    )
+    def post(self, request):
+        serializer = PaymentCheckoutSessionCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        appointment_id = serializer.validated_data['appointment_id']
+        provider = serializer.validated_data.get('provider', 'paymob')
+
+        try:
+            appointment = Appointment.objects.get(id=appointment_id, patient=request.user)
+        except Appointment.DoesNotExist:
+            return Response({'detail': 'Appointment not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if appointment.status in ('rejected', 'cancelled'):
+            return Response({'detail': 'Cannot pay for rejected/cancelled appointment.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            amount = Decimal(str(appointment.total_price))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response({'detail': 'Invalid appointment total price.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if amount <= 0:
+            return Response({'detail': 'Appointment total must be greater than zero.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing_paid = PaymentTransaction.objects.filter(
+            appointment=appointment,
+            user=request.user,
+            status='paid',
+        ).first()
+        if existing_paid:
+            return Response(PaymentTransactionSerializer(existing_paid).data, status=status.HTTP_200_OK)
+
+        tx = PaymentTransaction.objects.create(
+            appointment=appointment,
+            user=request.user,
+            provider=provider,
+            status='pending',
+            amount=amount,
+            currency='EGP',
+        )
+
+        try:
+            paymob_data = create_paymob_intention(
+                user=request.user,
+                amount=amount,
+                currency='EGP',
+                merchant_order_id=str(tx.id),
+            )
+        except Exception as exc:
+            tx.status = 'failed'
+            tx.provider_payload = {'error': str(exc)}
+            tx.save(update_fields=['status', 'provider_payload', 'updated_at'])
+            return Response(
+                {'detail': f'Failed to create checkout session: {exc}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        tx.provider_reference = paymob_data['provider_reference']
+        tx.client_secret = paymob_data['client_secret']
+        tx.checkout_url = paymob_data['checkout_url']
+        tx.status = 'processing'
+        tx.provider_payload = paymob_data['raw']
+        tx.save(update_fields=[
+            'provider_reference',
+            'client_secret',
+            'checkout_url',
+            'status',
+            'provider_payload',
+            'updated_at',
+        ])
+
+        return Response(PaymentTransactionSerializer(tx).data, status=status.HTTP_201_CREATED)
+
+
+class PaymentTransactionStatusView(APIView):
+    """Return payment status, refreshing from Paymob if possible."""
+
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_id='payment_transaction_status',
+        operation_summary='Get payment transaction status',
+        responses={200: PaymentTransactionSerializer, 404: 'Not found'},
+        tags=['Payments'],
+    )
+    def get(self, request, transaction_id):
+        try:
+            tx = PaymentTransaction.objects.select_related('appointment').get(id=transaction_id, user=request.user)
+        except PaymentTransaction.DoesNotExist:
+            return Response({'detail': 'Payment transaction not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if tx.status not in ('paid', 'failed', 'cancelled') and tx.provider == 'paymob' and tx.provider_reference:
+            try:
+                status_data = fetch_paymob_intention_status(tx.provider_reference)
+                tx.provider_payload = status_data['raw']
+                if status_data['is_paid']:
+                    tx.status = 'paid'
+                    tx.paid_at = tx.paid_at or dj_timezone.now()
+                elif status_data['status'] in {'failed', 'declined', 'cancelled'}:
+                    tx.status = 'failed'
+                tx.save(update_fields=['provider_payload', 'status', 'paid_at', 'updated_at'])
+            except Exception:
+                # Keep existing state when provider status refresh fails.
+                pass
+
+        return Response(PaymentTransactionSerializer(tx).data)
+
+
+class PaymentMethodListCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_id='list_payment_methods',
+        operation_summary='List saved payment methods',
+        responses={200: PaymentMethodSerializer(many=True)},
+        tags=['Payments'],
+    )
+    def get(self, request):
+        methods = PaymentMethod.objects.filter(user=request.user, is_active=True)
+        return Response(PaymentMethodSerializer(methods, many=True).data)
+
+    @swagger_auto_schema(
+        operation_id='create_payment_method',
+        operation_summary='Save a payment method',
+        request_body=PaymentMethodCreateSerializer,
+        responses={201: PaymentMethodSerializer, 400: 'Validation error'},
+        tags=['Payments'],
+    )
+    def post(self, request):
+        serializer = PaymentMethodCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        last4 = data['card_number'][-4:]
+
+        if data.get('is_default'):
+            PaymentMethod.objects.filter(user=request.user, is_default=True).update(is_default=False)
+
+        method = PaymentMethod.objects.create(
+            user=request.user,
+            brand=data['brand'],
+            last4=last4,
+            holder_name=data['holder_name'],
+            expiry=data['expiry'],
+            is_default=bool(data.get('is_default')),
+        )
+
+        if not PaymentMethod.objects.filter(user=request.user, is_default=True, is_active=True).exists():
+            method.is_default = True
+            method.save(update_fields=['is_default', 'updated_at'])
+
+        return Response(PaymentMethodSerializer(method).data, status=status.HTTP_201_CREATED)
+
+
+class PaymentMethodDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def _get_method(self, user, method_id):
+        try:
+            return PaymentMethod.objects.get(id=method_id, user=user, is_active=True)
+        except PaymentMethod.DoesNotExist:
+            return None
+
+    @swagger_auto_schema(
+        operation_id='update_payment_method',
+        operation_summary='Update payment method',
+        request_body=PaymentMethodUpdateSerializer,
+        responses={200: PaymentMethodSerializer, 404: 'Not found'},
+        tags=['Payments'],
+    )
+    def patch(self, request, method_id):
+        method = self._get_method(request.user, method_id)
+        if method is None:
+            return Response({'detail': 'Payment method not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = PaymentMethodUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        is_default = serializer.validated_data['is_default']
+        if is_default:
+            PaymentMethod.objects.filter(user=request.user, is_default=True).exclude(id=method.id).update(is_default=False)
+        method.is_default = is_default
+        method.save(update_fields=['is_default', 'updated_at'])
+
+        return Response(PaymentMethodSerializer(method).data)
+
+    @swagger_auto_schema(
+        operation_id='delete_payment_method',
+        operation_summary='Delete payment method',
+        responses={204: 'Deleted', 404: 'Not found'},
+        tags=['Payments'],
+    )
+    def delete(self, request, method_id):
+        method = self._get_method(request.user, method_id)
+        if method is None:
+            return Response({'detail': 'Payment method not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        was_default = method.is_default
+        method.is_active = False
+        method.is_default = False
+        method.save(update_fields=['is_active', 'is_default', 'updated_at'])
+
+        if was_default:
+            fallback = PaymentMethod.objects.filter(
+                user=request.user,
+                is_active=True,
+            ).order_by('-created_at').first()
+            if fallback:
+                fallback.is_default = True
+                fallback.save(update_fields=['is_default', 'updated_at'])
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PaymentPreferenceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        operation_id='get_payment_preference',
+        operation_summary='Get mobile wallet and cash-on-visit preferences',
+        responses={200: PaymentPreferenceSerializer},
+        tags=['Payments'],
+    )
+    def get(self, request):
+        preference, _ = PaymentPreference.objects.get_or_create(user=request.user)
+        return Response(PaymentPreferenceSerializer(preference).data)
+
+    @swagger_auto_schema(
+        operation_id='update_payment_preference',
+        operation_summary='Update mobile wallet and cash-on-visit preferences',
+        request_body=PaymentPreferenceSerializer,
+        responses={200: PaymentPreferenceSerializer},
+        tags=['Payments'],
+    )
+    def patch(self, request):
+        preference, _ = PaymentPreference.objects.get_or_create(user=request.user)
+        serializer = PaymentPreferenceSerializer(preference, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        if data.get('mobile_wallet_enabled') is False:
+            preference.mobile_wallet_provider = ''
+        serializer.save()
+        return Response(PaymentPreferenceSerializer(preference).data)
 
 
 class UpcomingAppointmentView(APIView):
