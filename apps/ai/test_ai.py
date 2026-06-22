@@ -142,9 +142,9 @@ def call_gemini(
     aspect_ratio: str | None = None,
 ) -> bytes:
     """POST image + prompt to Gemini image model; return the generated PNG bytes."""
-    api_key = getattr(settings, 'NANOBANANAPRO_API_KEY', '') or ''
+    api_key = getattr(settings, 'SMILIX_AI_API_KEY', '') or ''
     if not api_key:
-        raise RuntimeError('NANOBANANAPRO_API_KEY is not configured')
+        raise RuntimeError('SMILIX_AI_API_KEY is not configured')
 
     payload: dict = {
         'contents': [{
@@ -166,7 +166,7 @@ def call_gemini(
     if image_config:
         payload['generationConfig'] = {'imageConfig': image_config}
 
-    model = getattr(settings, 'NANOBANANAPRO_MODEL', GEMINI_DEFAULT_MODEL) or GEMINI_DEFAULT_MODEL
+    model = getattr(settings, 'SMILIX_AI_MODEL', GEMINI_DEFAULT_MODEL) or GEMINI_DEFAULT_MODEL
     response = requests.post(
         f'{GEMINI_API_BASE}/{model}:generateContent',
         params={'key': api_key},
@@ -322,7 +322,7 @@ def _generate_image(image_bytes: bytes, mime_type: str, services: List[str]) -> 
 
 
 # Backward-compat alias — external imports still work after the refactor
-call_nanobananapro = call_gemini
+call_smilix_ai = call_gemini
 
 
 # ─── Celery task ───
@@ -365,7 +365,7 @@ class StartSmilePreviewView(APIView):
 
     @swagger_auto_schema(
         operation_id='start_smile_preview',
-        operation_summary='Start a Nano Banana Pro smile preview',
+        operation_summary='Start a Smilix AI smile preview',
         operation_description=(
             'Dispatches a background job to generate an edited image of the patient\'s '
             'smile with the selected dental services applied. Returns a task_id to poll.'

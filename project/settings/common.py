@@ -216,6 +216,17 @@ SENDGRID_API_KEY = config('SENDGRID_API_KEY', default='')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@brightsmile.com')
 OTP_EMAILS_SYNC = config('OTP_EMAILS_SYNC', default=False, cast=bool)
 
+# SMTP delivery (defaults to Gmail). OTP/transactional mail is sent through
+# Django's email framework using these values.
+EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.smtp.EmailBackend')
+EMAIL_HOST = config('EMAIL_HOST', default='smtp.gmail.com')
+EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
+EMAIL_USE_SSL = config('EMAIL_USE_SSL', default=False, cast=bool)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+EMAIL_TIMEOUT = config('EMAIL_TIMEOUT', default=20, cast=int)
+
 # JWT Configuration
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=config('JWT_ACCESS_TOKEN_LIFETIME_MINUTES', default=60, cast=int)),
@@ -256,8 +267,8 @@ IDEMPOTENCY_CACHE_TTL_SECONDS = config('IDEMPOTENCY_CACHE_TTL_SECONDS', default=
 
 # Smile-preview integration — provider selector + per-provider credentials
 AI_PROVIDER = config('AI_PROVIDER', default='gemini')  # 'gemini' | 'huggingface' | 'cloudflare'
-NANOBANANAPRO_API_KEY = config('NANOBANANAPRO_API_KEY', default='')
-NANOBANANAPRO_MODEL = config('NANOBANANAPRO_MODEL', default='gemini-3-pro-image-preview')
+SMILIX_AI_API_KEY = config('SMILIX_AI_API_KEY', default='')
+SMILIX_AI_MODEL = config('SMILIX_AI_MODEL', default='gemini-3-pro-image-preview')
 HUGGINGFACE_API_TOKEN = config('HUGGINGFACE_API_TOKEN', default='')
 HUGGINGFACE_ENDPOINT_URL = config(
     'HUGGINGFACE_ENDPOINT_URL',

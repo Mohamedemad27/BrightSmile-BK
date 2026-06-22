@@ -1,85 +1,79 @@
 <!DOCTYPE html>
-<html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            margin: 0;
-            padding: 0;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        .header {
-            text-align: center;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #2563eb;
-            margin-bottom: 20px;
-        }
-        .header h1 {
-            color: #2563eb;
-            margin: 0;
-            font-size: 24px;
-        }
-        .content {
-            padding: 20px 0;
-        }
-        .otp-code {
-            font-size: 32px;
-            font-weight: bold;
-            color: #2563eb;
-            letter-spacing: 8px;
-            text-align: center;
-            padding: 20px;
-            background: #f3f4f6;
-            border-radius: 8px;
-            margin: 20px 0;
-        }
-        .warning {
-            background: #fef3c7;
-            border: 1px solid #f59e0b;
-            border-radius: 8px;
-            padding: 15px;
-            margin: 20px 0;
-            color: #92400e;
-        }
-        .footer {
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #e5e7eb;
-            font-size: 12px;
-            color: #6b7280;
-            text-align: center;
-        }
-        .btn {
-            display: inline-block;
-            padding: 12px 24px;
-            background-color: #2563eb;
-            color: #ffffff;
-            text-decoration: none;
-            border-radius: 6px;
-            font-weight: bold;
-        }
-    </style>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="color-scheme" content="light only">
+    <meta name="supported-color-schemes" content="light only">
+    <title>Smilix</title>
+    <!--[if mso]>
+    <style>table,td,div,p,a{font-family:Arial,Helvetica,sans-serif !important;}</style>
+    <![endif]-->
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Bright Smile</h1>
-        </div>
-        <div class="content">
-            {% block content %}{% endblock %}
-        </div>
-        <div class="footer">
-            <p>Best regards,<br>The Bright Smile Team</p>
-            <p>&copy; {{ year }} Bright Smile. All rights reserved.</p>
-        </div>
+<body style="margin:0; padding:0; width:100%; background-color:#F7F9FC; -webkit-font-smoothing:antialiased;">
+    <!-- Preheader (hidden preview text) -->
+    <div style="display:none; max-height:0; overflow:hidden; opacity:0; mso-hide:all;">
+        {% block preheader %}Your Smilix verification code.{% endblock %}
     </div>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+           style="background-color:#F7F9FC;">
+        <tr>
+            <td align="center" style="padding:32px 16px;">
+
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
+                       style="width:600px; max-width:600px; background-color:#FFFFFF; border:1px solid #E2E8F0; border-radius:16px; overflow:hidden;">
+
+                    <!-- Header / brand bar -->
+                    <tr>
+                        <td align="center" bgcolor="#2768B3"
+                            style="background-color:#2768B3; background-image:linear-gradient(135deg, #2768B3 0%, #1E6EF1 100%); padding:36px 24px;">
+                            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                                <tr>
+                                    <td style="padding-right:10px; font-size:30px; line-height:1;">🦷</td>
+                                    <td style="font-family:Arial,Helvetica,sans-serif; font-size:28px; font-weight:bold; letter-spacing:0.5px; color:#FFFFFF;">
+                                        Smilix
+                                    </td>
+                                </tr>
+                            </table>
+                            <div style="font-family:Arial,Helvetica,sans-serif; font-size:13px; color:#EEF5FB; margin-top:8px; letter-spacing:0.3px;">
+                                Bright Smile Dental Care
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- Body content -->
+                    <tr>
+                        <td style="padding:36px 40px 8px 40px; font-family:Arial,Helvetica,sans-serif; color:#1A1D26; font-size:16px; line-height:1.6;">
+                            {% block content %}{% endblock %}
+                        </td>
+                    </tr>
+
+                    <!-- Sign-off -->
+                    <tr>
+                        <td style="padding:8px 40px 32px 40px; font-family:Arial,Helvetica,sans-serif; color:#1A1D26; font-size:15px; line-height:1.6;">
+                            Warm regards,<br>
+                            <strong style="color:#2768B3;">The Smilix Team</strong>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color:#F7F9FC; border-top:1px solid #E2E8F0; padding:24px 40px; font-family:Arial,Helvetica,sans-serif; text-align:center;">
+                            <p style="margin:0 0 6px 0; font-size:12px; color:#6B7B8D; line-height:1.5;">
+                                This is an automated message — please do not reply to this email.
+                            </p>
+                            <p style="margin:0; font-size:12px; color:#94A3B8;">
+                                &copy; {{ year }} Smilix · Bright Smile. All rights reserved.
+                            </p>
+                        </td>
+                    </tr>
+
+                </table>
+
+            </td>
+        </tr>
+    </table>
 </body>
 </html>
