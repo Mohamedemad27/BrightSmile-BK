@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .nanobananapro import SmilePreviewStatusView, StartSmilePreviewView
+from .test_ai import SmilePreviewStatusView, StartSmilePreviewView
 from .views import AnalyzeSmileView
 
 app_name = 'ai'

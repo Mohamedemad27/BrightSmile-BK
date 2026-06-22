@@ -1,30 +1,3 @@
-"""
-Smile-preview generation — single-file, multi-provider integration.
-
-Providers (selectable via `AI_PROVIDER` env):
-  - 'gemini': Gemini 3 Pro Image (Nano Banana Pro) — paid, requires billing on
-    Google AI Studio.
-  - 'huggingface': HF Inference Providers router → FLUX.1 Kontext via fal-ai —
-    ~$0.10/month free credits on HF, then paid.
-  - 'cloudflare': Cloudflare Workers AI → Stable Diffusion 1.5 img2img —
-    free tier 10,000 neurons/day (~hundreds of images), no card required.
-
-Each provider exposes `call_<provider>(image_bytes, mime_type, prompt) -> bytes`
-returning the edited PNG bytes. A thin dispatcher picks the right one.
-
-Flow:
-  - Celery task `generate_smile_preview_task` runs the call off-request so the
-    web process is never blocked.
-  - DRF views:
-      POST /api/ai/smile-preview/          -> dispatches task, returns task_id
-      GET  /api/ai/smile-preview/<task_id>/ -> polls progress + result_url
-
-Response shape:
-  { "task_id": "...", "status": "pending|progress|success|failure",
-    "progress": 0-100, "stage": "queued|preparing|generating|saving|done|error",
-    "result_url": "...", "error": "..." }
-"""
-
 from __future__ import annotations
 
 import base64

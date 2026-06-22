@@ -175,6 +175,49 @@ class AdminDoctorApproveView(APIView):
         return api_success(message='Doctor approved successfully.')
 
 
+class AdminDoctorDeclineView(APIView):
+    permission_classes = [IsAuthenticated, AdminDashboardPermission]
+    required_permission = 'approve_doctors'
+
+    def post(self, request, pk):
+        doctor = AdminUserService.get_doctor_or_none(pk)
+        if doctor is None:
+            return Response({'detail': 'Doctor not found.'}, status=status.HTTP_404_NOT_FOUND)
+        self.check_object_permissions(request, doctor)
+
+        reason = ''
+        if isinstance(request.data, dict):
+            reason = (request.data.get('reason') or '').strip()
+
+        snapshot = AdminUserService.decline_doctor(doctor)
+        if snapshot is None:
+            return Response(
+                {'detail': 'Only pending doctors can be declined.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if is_feature_enabled('enable_audit_logging', True):
+            AuditService.log_action(
+                user=request.user,
+                action='doctor_declined',
+                target_type='Doctor',
+                target_id=snapshot['id'],
+                description='Admin declined doctor registration.',
+                ip_address=request.META.get('REMOTE_ADDR'),
+                metadata={
+                    'email': snapshot['email'],
+                    'full_name': snapshot['full_name'],
+                    'syndicate_number': snapshot['syndicate_number'],
+                    'reason': reason,
+                },
+            )
+            DashboardCacheService.invalidate_prefix('dashboard:admin:audit')
+
+        DashboardCacheService.invalidate_prefix('dashboard:admin:doctors')
+        DashboardCacheService.invalidate_prefix('dashboard:admin:analytics')
+        return api_success(message='Doctor registration declined.')
+
+
 class AdminDoctorProfileUpdateView(APIView):
     permission_classes = [IsAuthenticated, AdminDashboardPermission]
     required_permission = 'manage_doctor_profiles'

@@ -4,6 +4,7 @@ from .admin_views import (
     AdminUserDetailView,
     AdminDoctorListView,
     AdminDoctorApproveView,
+    AdminDoctorDeclineView,
     AdminDoctorProfileUpdateView,
     AdminAppointmentListView,
     AdminReviewListView,

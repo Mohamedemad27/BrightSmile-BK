@@ -28,3 +28,25 @@ class AdminUserService:
         user.is_active = True
         user.save(update_fields=["is_active", "updated_at"])
         return True
+
+    @staticmethod
+    def decline_doctor(doctor):
+        """
+        Decline (reject) a pending doctor registration.
+
+        Only pending (inactive) doctors may be declined. On success the user
+        account is deleted (cascading to the Doctor profile) and a snapshot of
+        the removed account is returned for audit logging. Returns None if the
+        doctor is already active and therefore cannot be declined.
+        """
+        user = doctor.user
+        if user.is_active:
+            return None
+        snapshot = {
+            "id": str(user.id),
+            "email": user.email,
+            "full_name": user.get_full_name(),
+            "syndicate_number": doctor.syndicate_number,
+        }
+        user.delete()
+        return snapshot

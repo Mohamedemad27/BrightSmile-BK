@@ -1,0 +1,167 @@
+[
+  {
+    "syndicate_number": "SYN-10001",
+    "full_name": "Dr. Ahmed Hassan",
+    "email": "doctor@smilix.com",
+    "license_number": "LIC-2024-00312",
+    "license_issue_date": "2024-01-15",
+    "license_expiry_date": "2027-01-15",
+    "license_status": "active",
+    "specialty": "Orthodontics",
+    "syndicate_join_date": "2020-03-10"
+  },
+  {
+    "syndicate_number": "SYN-10002",
+    "full_name": "Dr. James Wilson",
+    "email": "dr.james@smilix.com",
+    "license_number": "LIC-2023-00198",
+    "license_issue_date": "2023-06-20",
+    "license_expiry_date": "2026-06-20",
+    "license_status": "active",
+    "specialty": "Periodontics",
+    "syndicate_join_date": "2019-08-05"
+  },
+  {
+    "syndicate_number": "SYN-10003",
+    "full_name": "Dr. Emily Roberts",
+    "email": "dr.emily@smilix.com",
+    "license_number": "LIC-2022-00087",
+    "license_issue_date": "2022-03-01",
+    "license_expiry_date": "2025-03-01",
+    "license_status": "expired",
+    "specialty": "Endodontics",
+    "syndicate_join_date": "2018-11-22"
+  },
+  {
+    "syndicate_number": "SYN-10004",
+    "full_name": "Dr. Michael Chen",
+    "email": "dr.michael@smilix.com",
+    "license_number": "LIC-2024-00445",
+    "license_issue_date": "2024-04-10",
+    "license_expiry_date": "2027-04-10",
+    "license_status": "active",
+    "specialty": "Prosthodontics",
+    "syndicate_join_date": "2021-01-18"
+  },
+  {
+    "syndicate_number": "SYN-10005",
+    "full_name": "Dr. Sarah Johnson",
+    "email": "dr.sarah@smilix.com",
+    "license_number": "LIC-2021-00056",
+    "license_issue_date": "2021-09-15",
+    "license_expiry_date": "2024-09-15",
+    "license_status": "suspended",
+    "specialty": "Oral Surgery",
+    "syndicate_join_date": "2017-05-30"
+  },
+  {
+    "syndicate_number": "SYN-10006",
+    "full_name": "Dr. Nour El-Din",
+    "email": "nour.eldin@smilix.com",
+    "license_number": "LIC-2023-00321",
+    "license_issue_date": "2023-11-01",
+    "license_expiry_date": "2026-11-01",
+    "license_status": "active",
+    "specialty": "Pediatric Dentistry",
+    "syndicate_join_date": "2020-07-14"
+  },
+  {
+    "syndicate_number": "SYN-10007",
+    "full_name": "Dr. Layla Mahmoud",
+    "email": "layla.mahmoud@smilix.com",
+    "license_number": "LIC-2020-00112",
+    "license_issue_date": "2020-02-20",
+    "license_expiry_date": "2023-02-20",
+    "license_status": "revoked",
+    "specialty": "General Dentistry",
+    "syndicate_join_date": "2016-09-01"
+  },
+  {
+    "syndicate_number": "SYN-10008",
+    "full_name": "Dr. Karim Saeed",
+    "email": "karim.saeed@smilix.com",
+    "license_number": "LIC-2025-00501",
+    "license_issue_date": "2025-01-05",
+    "license_expiry_date": "2028-01-05",
+    "license_status": "active",
+    "specialty": "Cosmetic Dentistry",
+    "syndicate_join_date": "2022-04-20"
+  },
+  {
+    "syndicate_number": "SYN-10009",
+    "full_name": "Dr. Hana Mostafa",
+    "email": "hana.mostafa@smilix.com",
+    "license_number": "LIC-2024-00389",
+    "license_issue_date": "2024-07-12",
+    "license_expiry_date": "2027-07-12",
+    "license_status": "active",
+    "specialty": "Orthodontics",
+    "syndicate_join_date": "2021-10-03"
+  },
+  {
+    "syndicate_number": "SYN-10010",
+    "full_name": "Dr. Tarek Adel",
+    "email": "tarek.adel@smilix.com",
+    "license_number": "LIC-2022-00200",
+    "license_issue_date": "2022-08-18",
+    "license_expiry_date": "2025-08-18",
+    "license_status": "active",
+    "specialty": "Implantology",
+    "syndicate_join_date": "2019-02-27"
+  },
+  {
+    "syndicate_number": "SYN-10011",
+    "full_name": "Dr. Omar Farouk",
+    "email": "omar.farouk@example.com",
+    "license_number": "LIC-2025-00612",
+    "license_issue_date": "2025-02-10",
+    "license_expiry_date": "2028-02-10",
+    "license_status": "active",
+    "specialty": "General Dentistry",
+    "syndicate_join_date": "2023-03-15"
+  },
+  {
+    "syndicate_number": "SYN-10012",
+    "full_name": "Dr. Yara Selim",
+    "email": "yara.selim@example.com",
+    "license_number": "LIC-2025-00633",
+    "license_issue_date": "2025-03-01",
+    "license_expiry_date": "2028-03-01",
+    "license_status": "active",
+    "specialty": "Orthodontics",
+    "syndicate_join_date": "2023-05-20"
+  },
+  {
+    "syndicate_number": "SYN-10013",
+    "full_name": "Dr. Khaled Mansour",
+    "email": "khaled.mansour@example.com",
+    "license_number": "LIC-2025-00657",
+    "license_issue_date": "2025-04-12",
+    "license_expiry_date": "2028-04-12",
+    "license_status": "active",
+    "specialty": "Endodontics",
+    "syndicate_join_date": "2023-07-08"
+  },
+  {
+    "syndicate_number": "SYN-10014",
+    "full_name": "Dr. Mona Adel",
+    "email": "mona.adel@example.com",
+    "license_number": "LIC-2025-00701",
+    "license_issue_date": "2025-05-22",
+    "license_expiry_date": "2028-05-22",
+    "license_status": "active",
+    "specialty": "Pediatric Dentistry",
+    "syndicate_join_date": "2023-09-30"
+  },
+  {
+    "syndicate_number": "SYN-10015",
+    "full_name": "Dr. Hossam Nabil",
+    "email": "hossam.nabil@example.com",
+    "license_number": "LIC-2025-00744",
+    "license_issue_date": "2025-06-18",
+    "license_expiry_date": "2028-06-18",
+    "license_status": "active",
+    "specialty": "Prosthodontics",
+    "syndicate_join_date": "2024-01-11"
+  }
+]

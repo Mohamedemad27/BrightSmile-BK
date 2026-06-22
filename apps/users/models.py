@@ -227,6 +227,13 @@ class Doctor(models.Model):
         validators=[phone_number_validator],
         db_index=True
     )
+    syndicate_number = models.CharField(
+        max_length=50,
+        blank=True,
+        default='',
+        db_index=True,
+        help_text="Dental syndicate membership number, verified at registration.",
+    )
     specialty = models.CharField(max_length=100, blank=True, default='')
     rating = models.DecimalField(
         max_digits=3, decimal_places=1, default=0.0, db_index=True,

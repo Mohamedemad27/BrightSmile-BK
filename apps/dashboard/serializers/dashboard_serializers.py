@@ -223,6 +223,8 @@ class AdminDoctorListSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(source='user.email', read_only=True)
     full_name = serializers.CharField(source='user.get_full_name', read_only=True)
     is_active = serializers.BooleanField(source='user.is_active', read_only=True)
+    license_status = serializers.SerializerMethodField()
+    license_expiry_date = serializers.SerializerMethodField()
 
     class Meta:
         model = Doctor
@@ -236,9 +238,34 @@ class AdminDoctorListSerializer(serializers.ModelSerializer):
             'is_active',
             'profile_image_url',
             'location',
+            'syndicate_number',
+            'license_status',
+            'license_expiry_date',
             'created_at',
         ]
         read_only_fields = fields
+
+    def _syndicate_record(self, obj):
+        if not obj.syndicate_number:
+            return None
+        from apps.dashboard.services.syndicate.syndicate_registry import (
+            SyndicateRegistryService,
+        )
+        return SyndicateRegistryService.lookup_by_number(obj.syndicate_number)
+
+    def get_license_status(self, obj):
+        """Resolve the doctor's license status from the syndicate registry."""
+        record = self._syndicate_record(obj)
+        if not record:
+            return ''
+        return (record.get('license_status') or '').strip().lower()
+
+    def get_license_expiry_date(self, obj):
+        """Resolve the doctor's license expiry date from the syndicate registry."""
+        record = self._syndicate_record(obj)
+        if not record:
+            return None
+        return record.get('license_expiry_date')
 
 
 class AdminDoctorProfileUpdateSerializer(serializers.ModelSerializer):

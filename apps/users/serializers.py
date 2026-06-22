@@ -171,12 +171,53 @@ class PatientRegistrationSerializer(serializers.Serializer):
         return user
 
 
+def validate_syndicate_membership(value):
+    """
+    Verify a syndicate number against the dental syndicate registry.
+
+    Returns a tuple of (canonical_syndicate_number, registry_record) when the
+    number is genuine, the license is active, and it has not already been
+    claimed by another doctor. Raises a DRF ValidationError otherwise.
+    """
+    # Lazy import to avoid an import-time cycle between the users and dashboard apps.
+    from apps.dashboard.services.syndicate.syndicate_registry import (
+        ACTIVE_STATUSES,
+        SyndicateRegistryService,
+    )
+
+    number = (value or '').strip()
+    if not number:
+        raise serializers.ValidationError("Syndicate number is required.")
+
+    record = SyndicateRegistryService.lookup_by_number(number)
+    if record is None:
+        raise serializers.ValidationError(
+            "This syndicate number was not found in the dental syndicate registry."
+        )
+
+    license_status = (record.get('license_status') or '').strip().lower()
+    if license_status not in ACTIVE_STATUSES:
+        raise serializers.ValidationError(
+            f"This syndicate license is {license_status or 'inactive'}. "
+            "Only members with an active license can register."
+        )
+
+    canonical = (record.get('syndicate_number') or number).strip()
+    if Doctor.objects.filter(syndicate_number__iexact=canonical).exists():
+        raise serializers.ValidationError(
+            "This syndicate number is already registered to another account."
+        )
+
+    return canonical, record
+
+
 class DoctorRegistrationSerializer(serializers.Serializer):
     """
     Serializer for doctor registration.
 
     Creates a User with is_active=False, is_verified=False (requires admin approval)
-    and an associated Doctor profile.
+    and an associated Doctor profile. The syndicate number is verified against the
+    dental syndicate registry before the account is created.
     """
 
     # User fields
@@ -207,6 +248,17 @@ class DoctorRegistrationSerializer(serializers.Serializer):
         max_length=20,
         help_text="Phone number in international format (e.g., +1234567890)"
     )
+    syndicate_number = serializers.CharField(
+        max_length=50,
+        help_text="Dental syndicate membership number (verified against the syndicate registry)"
+    )
+    specialty = serializers.CharField(
+        max_length=100,
+        required=False,
+        allow_blank=True,
+        default='',
+        help_text="Dental specialty (optional; defaults to the syndicate record on file)"
+    )
 
     def validate_email(self, value):
         """Check that email is unique."""
@@ -214,6 +266,11 @@ class DoctorRegistrationSerializer(serializers.Serializer):
         if User.objects.filter(email__iexact=email).exists():
             raise serializers.ValidationError("A user with this email already exists.")
         return email
+
+    def validate_syndicate_number(self, value):
+        """Verify the syndicate number against the registry."""
+        canonical, _record = validate_syndicate_membership(value)
+        return canonical
 
     def validate_password(self, value):
         """Validate password using Django's password validators."""
@@ -247,6 +304,8 @@ class DoctorRegistrationSerializer(serializers.Serializer):
 
         # Extract doctor-specific fields
         phone_number = validated_data.pop('phone_number')
+        syndicate_number = validated_data.pop('syndicate_number')
+        specialty = (validated_data.pop('specialty', '') or '').strip()
 
         # Create user (inactive until admin approval)
         user = User.objects.create_user(
@@ -259,10 +318,21 @@ class DoctorRegistrationSerializer(serializers.Serializer):
             is_verified=False,
         )
 
+        # Fall back to the specialty recorded in the syndicate registry.
+        if not specialty:
+            from apps.dashboard.services.syndicate.syndicate_registry import (
+                SyndicateRegistryService,
+            )
+            record = SyndicateRegistryService.lookup_by_number(syndicate_number)
+            if record:
+                specialty = (record.get('specialty') or '').strip()
+
         # Create doctor profile
         Doctor.objects.create(
             user=user,
             phone_number=phone_number,
+            syndicate_number=syndicate_number,
+            specialty=specialty,
         )
 
         return user
@@ -933,6 +1003,11 @@ class GoogleDoctorAuthSerializer(serializers.Serializer):
         required=False,
         help_text="Phone number in international format (e.g., +1234567890) - required for new users"
     )
+    syndicate_number = serializers.CharField(
+        max_length=50,
+        required=False,
+        help_text="Dental syndicate membership number - required for new users"
+    )
 
     def validate_phone_number(self, value):
         """Validate phone number format if provided."""
@@ -996,6 +1071,18 @@ class GoogleDoctorAuthSerializer(serializers.Serializer):
                     'phone_number': "This field is required for new users."
                 })
 
+            if not attrs.get('syndicate_number'):
+                raise serializers.ValidationError({
+                    'syndicate_number': "This field is required for new users."
+                })
+
+            # Verify syndicate membership before creating the account.
+            try:
+                canonical, _record = validate_syndicate_membership(attrs['syndicate_number'])
+            except serializers.ValidationError as exc:
+                raise serializers.ValidationError({'syndicate_number': exc.detail})
+            attrs['syndicate_number'] = canonical
+
         return attrs
 
     @transaction.atomic
@@ -1020,10 +1107,20 @@ class GoogleDoctorAuthSerializer(serializers.Serializer):
             auth_provider='google',
         )
 
+        # Resolve specialty from the syndicate registry record.
+        syndicate_number = validated_data['syndicate_number']
+        from apps.dashboard.services.syndicate.syndicate_registry import (
+            SyndicateRegistryService,
+        )
+        record = SyndicateRegistryService.lookup_by_number(syndicate_number)
+        specialty = (record.get('specialty') or '').strip() if record else ''
+
         # Create doctor profile
         Doctor.objects.create(
             user=user,
             phone_number=validated_data['phone_number'],
+            syndicate_number=syndicate_number,
+            specialty=specialty,
         )
 
         return user
