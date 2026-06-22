@@ -95,6 +95,13 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 # covers the input so we never upscale during generation.
 GEMINI_SIZE_BUCKETS = (('1K', 1024), ('2K', 2048), ('4K', 4096))
 
+# Cap the resolution we ask Gemini to generate. 'gemini-3-pro-image' is slow at
+# 2K/4K, and full-resolution phone photos push generation past the request
+# timeout (mobile camera captures are ~3-4K on the longest edge). We downscale
+# the input and generate at ~1K, then resize the result to the capped size for
+# display — keeps generation comfortably under the timeout for any input size.
+GEMINI_MAX_GEN_DIM = 1024
+
 # Aspect ratios Gemini 3 Pro Image supports. We snap the input's ratio to the
 # closest one so output framing roughly matches the input.
 GEMINI_ASPECT_RATIOS = (
@@ -296,10 +303,37 @@ def _match_input_resolution(output_bytes: bytes, target_size: tuple[int, int]) -
     return buf.getvalue()
 
 
+def _downscale_for_generation(
+    image_bytes: bytes, mime_type: str, max_dim: int,
+) -> tuple[bytes, tuple[int, int], str]:
+    """Cap the longest edge at max_dim before sending to the image model.
+
+    Returns (bytes, (width, height), mime_type). Small images pass through
+    untouched; larger ones are LANCZOS-downscaled and re-encoded as JPEG.
+    """
+    img = Image.open(io.BytesIO(image_bytes))
+    width, height = img.size
+    if max(width, height) <= max_dim:
+        return image_bytes, (width, height), mime_type
+
+    scale = max_dim / max(width, height)
+    new_size = (max(1, round(width * scale)), max(1, round(height * scale)))
+    if img.mode not in ('RGB', 'RGBA'):
+        img = img.convert('RGB')
+    resized = img.resize(new_size, Image.Resampling.LANCZOS)
+    buf = io.BytesIO()
+    if img.mode == 'RGBA':
+        resized.save(buf, format='PNG')
+        return buf.getvalue(), new_size, 'image/png'
+    resized.save(buf, format='JPEG', quality=90)
+    return buf.getvalue(), new_size, 'image/jpeg'
+
+
 def _generate_image(image_bytes: bytes, mime_type: str, services: List[str]) -> bytes:
     provider = (getattr(settings, 'AI_PROVIDER', 'gemini') or 'gemini').lower()
 
     input_size = Image.open(io.BytesIO(image_bytes)).size  # (width, height)
+    match_size = input_size
 
     if provider == 'huggingface':
         output = call_huggingface(image_bytes, mime_type, _build_prompt(services, style='instruction'))
@@ -307,10 +341,14 @@ def _generate_image(image_bytes: bytes, mime_type: str, services: List[str]) -> 
         positive, negative = _build_sd_prompt_pair(services)
         output = call_cloudflare(image_bytes, positive, negative)
     elif provider == 'gemini':
-        width, height = input_size
+        gen_bytes, gen_size, gen_mime = _downscale_for_generation(
+            image_bytes, mime_type, GEMINI_MAX_GEN_DIM,
+        )
+        match_size = gen_size
+        width, height = gen_size
         output = call_gemini(
-            image_bytes,
-            mime_type,
+            gen_bytes,
+            gen_mime,
             _build_prompt(services, style='narrative'),
             image_size=_pick_gemini_size(max(width, height)),
             aspect_ratio=_pick_gemini_aspect(width, height),
@@ -318,7 +356,7 @@ def _generate_image(image_bytes: bytes, mime_type: str, services: List[str]) -> 
     else:
         raise RuntimeError(f'Unknown AI_PROVIDER: {provider!r}. Use "gemini", "huggingface", or "cloudflare".')
 
-    return _match_input_resolution(output, input_size)
+    return _match_input_resolution(output, match_size)
 
 
 # Backward-compat alias — external imports still work after the refactor
